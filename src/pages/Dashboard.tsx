@@ -1,3 +1,4 @@
+import { Activity, Bot as BotIcon, CheckCircle2, CircleDollarSign, TrendingDown, TrendingUp, XCircle } from 'lucide-react';
 import { Bot, BacktestResult } from '../types';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -5,7 +6,6 @@ import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { StatCard } from '../components/StatCard';
 import { formatCurrency, formatPercent } from '../utils/formatters';
-import { Activity, Bot as BotIcon, CheckCircle2, CircleDollarSign, TrendingDown, TrendingUp, XCircle } from 'lucide-react';
 
 type DashboardProps = {
   bots: Bot[];
@@ -27,14 +27,14 @@ export function Dashboard({ bots, results, onCreateBot }: DashboardProps) {
     <>
       <PageHeader
         title="Dashboard"
-        description="Visão consolidada dos seus métodos simulados, sem dinheiro real e com dados locais."
+        description="Visao consolidada dos seus metodos, sem dinheiro real, com integracao preparada para dados reais."
         action={<Button onClick={onCreateBot}>Criar bot</Button>}
       />
 
       {bots.length === 0 ? (
         <EmptyState
           title="Nenhum bot criado ainda"
-          description="Crie seu primeiro método para começar a simular entradas, replay de jogos e backtests com dados mockados."
+          description="Crie seu primeiro metodo para acompanhar jogos reais e preparar regras para odds, replay e backtests."
           action={<Button onClick={onCreateBot}>Criar bot</Button>}
         />
       ) : (
@@ -43,7 +43,7 @@ export function Dashboard({ bots, results, onCreateBot }: DashboardProps) {
             <StatCard label="Bots criados" value={bots.length} icon={<BotIcon className="h-5 w-5" />} tone="blue" />
             <StatCard label="Bots ativos" value={bots.filter((bot) => bot.isActive).length} icon={<Activity className="h-5 w-5" />} />
             <StatCard
-              label="Lucro/prejuízo simulado"
+              label="Lucro/prejuizo"
               value={formatCurrency(profit)}
               icon={<CircleDollarSign className="h-5 w-5" />}
               tone={profit >= 0 ? 'green' : 'red'}
@@ -58,30 +58,30 @@ export function Dashboard({ bots, results, onCreateBot }: DashboardProps) {
             <StatCard label="Greens" value={greens} icon={<CheckCircle2 className="h-5 w-5" />} tone="green" />
             <StatCard label="Reds" value={reds} icon={<XCircle className="h-5 w-5" />} tone="red" />
             <StatCard
-              label="Melhor método"
+              label="Melhor metodo"
               value={best?.botName ?? '-'}
               icon={<TrendingUp className="h-5 w-5" />}
               tone="green"
             />
           </div>
 
-          <Card title="Resumo dos métodos" subtitle="Melhor e pior desempenho considerando o último backtest salvo por bot.">
+          <Card title="Resumo dos metodos" subtitle="Melhor e pior desempenho considerando o ultimo backtest salvo por bot.">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="rounded-lg bg-emerald-500/8 p-4">
                 <div className="flex items-center gap-2 text-emerald-300">
                   <TrendingUp className="h-4 w-4" />
-                  <span className="text-sm font-semibold">Melhor método</span>
+                  <span className="text-sm font-semibold">Melhor metodo</span>
                 </div>
                 <p className="mt-3 text-lg font-semibold text-white">{best?.botName ?? 'Sem backtest'}</p>
-                <p className="text-sm text-slate-400">{best ? `${formatPercent(best.roi)} | ${formatCurrency(best.profit)}` : 'Rode um backtest para popular os dados.'}</p>
+                <p className="text-sm text-slate-400">{best ? `${formatPercent(best.roi)} | ${formatCurrency(best.profit)}` : 'Rode um backtest quando houver historico real compativel.'}</p>
               </div>
               <div className="rounded-lg bg-red-500/8 p-4">
                 <div className="flex items-center gap-2 text-red-300">
                   <TrendingDown className="h-4 w-4" />
-                  <span className="text-sm font-semibold">Pior método</span>
+                  <span className="text-sm font-semibold">Pior metodo</span>
                 </div>
                 <p className="mt-3 text-lg font-semibold text-white">{worst?.botName ?? 'Sem backtest'}</p>
-                <p className="text-sm text-slate-400">{worst ? `${formatPercent(worst.roi)} | ${formatCurrency(worst.profit)}` : 'O comparativo aparece após os testes.'}</p>
+                <p className="text-sm text-slate-400">{worst ? `${formatPercent(worst.roi)} | ${formatCurrency(worst.profit)}` : 'O comparativo aparece apos os testes.'}</p>
               </div>
             </div>
           </Card>

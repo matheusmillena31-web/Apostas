@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node server/dev.mjs",
     "dev:frontend": "node server/frontendDev.mjs",
-    "dev:backend": "node server/apiFutebolProxy.mjs",
+    "dev:backend": "node server/apiFootballProxy.mjs",
     "build": "tsc -b && node server/frontendBuild.mjs",
     "preview": "node server/frontendPreview.mjs"
   },

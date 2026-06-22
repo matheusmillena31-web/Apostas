@@ -292,7 +292,7 @@ export function BacktestPage({ bots, selectedBot, initialResult, onResult }: Bac
     <>
       <PageHeader
         title="Backtest"
-        description="Teste um metodo contra jogos historicos e veja entradas simuladas, resultado, ROI e evolucao da banca."
+        description="Teste um metodo contra a base historica de snapshots reais quando houver volume suficiente de odds minuto a minuto."
         action={bot && <Button onClick={handleRun} icon={<Play className="h-4 w-4" />}>Rodar backtest</Button>}
       />
       {bots.length === 0 || !bot ? (
@@ -394,8 +394,8 @@ export function BacktestPage({ bots, selectedBot, initialResult, onResult }: Bac
             </>
           ) : (
             <EmptyState
-              title="Backtest pronto para rodar"
-              description="Clique em Rodar backtest para executar o bot selecionado e gerar estatisticas, grafico de banca e entradas."
+              title="Backtest aguardando base historica"
+              description="O motor esta pronto, mas precisa de snapshots reais acumulados pelo backend para backtests e replay completos."
             />
           )}
         </div>

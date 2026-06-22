@@ -1,0 +1,483 @@
+import { createServer } from 'node:http';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+
+const envFiles = ['.env.local', '.env'];
+
+for (const envFile of envFiles) {
+  const envPath = resolve(process.cwd(), envFile);
+
+  if (!existsSync(envPath)) continue;
+
+  const content = readFileSync(envPath, 'utf8');
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex < 0) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim().replace(/^["']|["']$/g, '');
+
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+const port = Number(process.env.BACKEND_PORT ?? 3333);
+const apiFootballBaseUrl = process.env.API_FOOTBALL_BASE_URL ?? 'https://v3.football.api-sports.io';
+const apiFootballToken = process.env.API_FOOTBALL_TOKEN;
+const allowedOrigin = process.env.BACKEND_ALLOWED_ORIGIN ?? '*';
+const snapshotPath = resolve(process.cwd(), process.env.API_FOOTBALL_SNAPSHOT_PATH ?? 'server/storage/api-football-snapshots.jsonl');
+const collectorStatePath = resolve(process.cwd(), process.env.API_FOOTBALL_COLLECTOR_STATE_PATH ?? 'server/storage/api-football-collector-state.json');
+const collectorEnabled = process.env.API_FOOTBALL_COLLECTOR_ENABLED !== 'false';
+const collectorIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_INTERVAL_MS ?? 90000);
+const collectorMaxFixtures = Number(process.env.API_FOOTBALL_COLLECTOR_MAX_FIXTURES ?? 2);
+const collectorRequestDelayMs = Number(process.env.API_FOOTBALL_COLLECTOR_REQUEST_DELAY_MS ?? 1200);
+const collectorDailyRequestLimit = Number(process.env.API_FOOTBALL_COLLECTOR_DAILY_REQUEST_LIMIT ?? 7200);
+const collectorStatsEnabled = process.env.API_FOOTBALL_COLLECTOR_STATS_ENABLED !== 'false';
+const collectorEventsEnabled = process.env.API_FOOTBALL_COLLECTOR_EVENTS_ENABLED !== 'false';
+const collectorOddsEnabled = process.env.API_FOOTBALL_COLLECTOR_ODDS_ENABLED !== 'false';
+
+const collectorState = {
+  enabled: collectorEnabled,
+  intervalMs: collectorIntervalMs,
+  maxFixtures: collectorMaxFixtures,
+  requestDelayMs: collectorRequestDelayMs,
+  dailyRequestLimit: collectorDailyRequestLimit,
+  requestDay: new Date().toISOString().slice(0, 10),
+  requestsUsedToday: 0,
+  requestsSkippedToday: 0,
+  fixtureCursor: 0,
+  running: false,
+  lastRunAt: null,
+  lastSuccessAt: null,
+  nextRunAt: null,
+  lastError: null,
+  lastRunSummary: null,
+  totalRuns: 0,
+  totalSnapshotsSaved: 0,
+};
+
+const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
+
+const getCollectorDay = () => new Date().toISOString().slice(0, 10);
+
+const persistCollectorBudget = () => {
+  mkdirSync(dirname(collectorStatePath), { recursive: true });
+  writeFileSync(
+    collectorStatePath,
+    JSON.stringify(
+      {
+        requestDay: collectorState.requestDay,
+        requestsUsedToday: collectorState.requestsUsedToday,
+        requestsSkippedToday: collectorState.requestsSkippedToday,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+};
+
+const loadCollectorBudget = () => {
+  if (!existsSync(collectorStatePath)) return;
+
+  try {
+    const saved = JSON.parse(readFileSync(collectorStatePath, 'utf8'));
+    if (saved.requestDay !== getCollectorDay()) return;
+
+    collectorState.requestDay = saved.requestDay;
+    collectorState.requestsUsedToday = Number(saved.requestsUsedToday ?? 0);
+    collectorState.requestsSkippedToday = Number(saved.requestsSkippedToday ?? 0);
+  } catch {
+    // Ignore corrupted local collector state; the next save will replace it.
+  }
+};
+
+loadCollectorBudget();
+
+const resetCollectorBudgetIfNeeded = () => {
+  const today = getCollectorDay();
+  if (collectorState.requestDay === today) return;
+
+  collectorState.requestDay = today;
+  collectorState.requestsUsedToday = 0;
+  collectorState.requestsSkippedToday = 0;
+  persistCollectorBudget();
+};
+
+const reserveCollectorRequest = () => {
+  resetCollectorBudgetIfNeeded();
+
+  if (collectorState.requestsUsedToday >= collectorDailyRequestLimit) {
+    collectorState.requestsSkippedToday += 1;
+    persistCollectorBudget();
+    throw new Error(`Orcamento diario do coletor atingido (${collectorDailyRequestLimit} requisicoes).`);
+  }
+
+  collectorState.requestsUsedToday += 1;
+  persistCollectorBudget();
+};
+
+const sendJson = (response, statusCode, payload) => {
+  response.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+  });
+  response.end(JSON.stringify(payload));
+};
+
+const readBody = (request) =>
+  new Promise((resolveBody, reject) => {
+    const chunks = [];
+
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => resolveBody(Buffer.concat(chunks)));
+    request.on('error', reject);
+  });
+
+const getSnapshotCount = async () => {
+  if (!existsSync(snapshotPath)) return 0;
+  const content = await readFile(snapshotPath, 'utf8');
+  return content.trim() ? content.trim().split(/\r?\n/).length : 0;
+};
+
+const buildTargetUrl = (requestUrl) => {
+  const incomingUrl = new URL(requestUrl, `http://localhost:${port}`);
+  const apiPath = incomingUrl.pathname.replace(/^\/api\/football/, '') || '/';
+  const targetUrl = new URL(`${apiFootballBaseUrl.replace(/\/$/, '')}${apiPath}`);
+  incomingUrl.searchParams.forEach((value, key) => targetUrl.searchParams.append(key, value));
+  return { targetUrl, apiPath, incomingUrl };
+};
+
+const getSnapshotKind = (apiPath, searchParams) => {
+  if (apiPath === '/fixtures' && searchParams.has('live')) return 'fixtures-live';
+  if (apiPath === '/fixtures/statistics') return 'fixture-statistics';
+  if (apiPath === '/fixtures/events') return 'fixture-events';
+  if (apiPath === '/odds/live') return 'odds-live';
+  if (apiPath === '/odds') return 'odds-pre-live';
+  return undefined;
+};
+
+const persistSnapshot = async ({ kind, apiPath, query, payload }) => {
+  if (!kind) return false;
+
+  await mkdir(dirname(snapshotPath), { recursive: true });
+  await appendFile(
+    snapshotPath,
+    `${JSON.stringify({
+      capturedAt: new Date().toISOString(),
+      provider: 'api-football',
+      kind,
+      apiPath,
+      query,
+      payload,
+    })}\n`,
+    'utf8',
+  );
+  return true;
+};
+
+const buildApiUrl = (apiPath, query = {}) => {
+  const targetUrl = new URL(`${apiFootballBaseUrl.replace(/\/$/, '')}${apiPath}`);
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      targetUrl.searchParams.set(key, String(value));
+    }
+  });
+  return targetUrl;
+};
+
+const hasApiErrors = (payload) => {
+  const errors = payload?.errors;
+  if (!errors) return false;
+  if (Array.isArray(errors)) return errors.length > 0;
+  if (typeof errors === 'object') return Object.keys(errors).length > 0;
+  return Boolean(errors);
+};
+
+const callApiFootball = async (apiPath, query = {}, { useCollectorBudget = false } = {}) => {
+  const targetUrl = buildApiUrl(apiPath, query);
+  let response;
+
+  if (useCollectorBudget) reserveCollectorRequest();
+
+  try {
+    response = await fetch(targetUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'x-apisports-key': apiFootballToken,
+      },
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? `${error.message}${error.cause ? `: ${String(error.cause)}` : ''}` : String(error);
+    throw new Error(`Falha de rede em ${apiPath}: ${detail}`);
+  }
+
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(`API-FOOTBALL ${response.status} em ${apiPath}`);
+  }
+
+  if (hasApiErrors(payload)) {
+    throw new Error(`API-FOOTBALL retornou erro em ${apiPath}: ${JSON.stringify(payload.errors)}`);
+  }
+
+  return { payload, query: Object.fromEntries(targetUrl.searchParams.entries()) };
+};
+
+const collectEndpoint = async (apiPath, query, kind) => {
+  const { payload, query: normalizedQuery } = await callApiFootball(apiPath, query, { useCollectorBudget: true });
+  const saved = await persistSnapshot({
+    kind,
+    apiPath,
+    query: normalizedQuery,
+    payload,
+  });
+  return { payload, saved };
+};
+
+const isRateLimitError = (error) =>
+  error instanceof Error && (error.message.includes('429') || error.message.toLowerCase().includes('rate'));
+
+const collectEndpointSafely = async (apiPath, query, kind) => {
+  try {
+    return { ok: true, ...(await collectEndpoint(apiPath, query, kind)) };
+  } catch (error) {
+    return {
+      ok: false,
+      rateLimited: isRateLimitError(error),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+const selectFixturesForCollector = (fixtures) => {
+  const maxFixtures = Math.max(0, collectorMaxFixtures);
+  if (fixtures.length <= maxFixtures) return fixtures;
+
+  const selected = [];
+  const startIndex = collectorState.fixtureCursor % fixtures.length;
+
+  for (let offset = 0; offset < maxFixtures; offset += 1) {
+    selected.push(fixtures[(startIndex + offset) % fixtures.length]);
+  }
+
+  collectorState.fixtureCursor = (startIndex + maxFixtures) % fixtures.length;
+  return selected;
+};
+
+const runCollector = async ({ reason = 'scheduled' } = {}) => {
+  if (!apiFootballToken) {
+    collectorState.lastError = 'Token da API-FOOTBALL ausente.';
+    return { ok: false, reason, error: collectorState.lastError, state: collectorState };
+  }
+
+  if (collectorState.running) {
+    return { ok: true, reason, skipped: true, message: 'Coleta ja em andamento.', state: collectorState };
+  }
+
+  collectorState.running = true;
+  collectorState.lastRunAt = new Date().toISOString();
+  collectorState.totalRuns += 1;
+  collectorState.lastError = null;
+
+  const errors = [];
+  let snapshotsSaved = 0;
+  let fixtures = [];
+
+  try {
+    const live = await collectEndpoint(
+      '/fixtures',
+      { live: 'all', timezone: 'America/Sao_Paulo' },
+      'fixtures-live',
+    );
+    snapshotsSaved += live.saved ? 1 : 0;
+    fixtures = Array.isArray(live.payload?.response) ? live.payload.response : [];
+
+    const fixturesToCollect = selectFixturesForCollector(fixtures);
+
+    let rateLimited = false;
+
+    for (const fixture of fixturesToCollect) {
+      if (rateLimited) break;
+      const fixtureId = fixture?.fixture?.id;
+      if (!fixtureId) continue;
+
+      const endpointJobs = [
+        collectorStatsEnabled ? ['/fixtures/statistics', { fixture: fixtureId }, 'fixture-statistics'] : undefined,
+        collectorEventsEnabled ? ['/fixtures/events', { fixture: fixtureId }, 'fixture-events'] : undefined,
+        collectorOddsEnabled ? ['/odds/live', { fixture: fixtureId }, 'odds-live'] : undefined,
+      ].filter(Boolean);
+
+      for (const [apiPath, query, kind] of endpointJobs) {
+        await wait(collectorRequestDelayMs);
+        const result = await collectEndpointSafely(apiPath, query, kind);
+
+        if (result.ok) {
+          snapshotsSaved += result.saved ? 1 : 0;
+          continue;
+        }
+
+        errors.push(result.error);
+        if (result.rateLimited) {
+          rateLimited = true;
+          break;
+        }
+      }
+    }
+
+    collectorState.totalSnapshotsSaved += snapshotsSaved;
+    collectorState.lastSuccessAt = new Date().toISOString();
+    collectorState.lastRunSummary = {
+      reason,
+      fixturesFound: fixtures.length,
+      fixturesCollected: fixturesToCollect.length,
+      snapshotsSaved,
+      requestsUsedToday: collectorState.requestsUsedToday,
+      dailyRequestLimit: collectorDailyRequestLimit,
+      errors,
+    };
+
+    return { ok: true, state: collectorState };
+  } catch (error) {
+    collectorState.lastError = error instanceof Error ? error.message : 'Erro desconhecido na coleta.';
+    collectorState.lastRunSummary = {
+      reason,
+      fixturesFound: fixtures.length,
+      fixturesCollected: 0,
+      snapshotsSaved,
+      requestsUsedToday: collectorState.requestsUsedToday,
+      dailyRequestLimit: collectorDailyRequestLimit,
+      errors: [collectorState.lastError],
+    };
+    return { ok: false, error: collectorState.lastError, state: collectorState };
+  } finally {
+    collectorState.running = false;
+    collectorState.nextRunAt = collectorEnabled ? new Date(Date.now() + collectorIntervalMs).toISOString() : null;
+  }
+};
+
+const startCollector = () => {
+  if (!collectorEnabled || !apiFootballToken) return;
+
+  collectorState.nextRunAt = new Date(Date.now() + 1500).toISOString();
+  setTimeout(() => runCollector({ reason: 'startup' }), 1500);
+  setInterval(() => runCollector({ reason: 'scheduled' }), collectorIntervalMs);
+};
+
+const server = createServer(async (request, response) => {
+  response.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+
+  const incomingUrl = new URL(request.url ?? '/', `http://localhost:${port}`);
+
+  if (incomingUrl.pathname === '/health' || incomingUrl.pathname === '/api/football/health') {
+    sendJson(response, 200, {
+      ok: true,
+      service: 'api-football-proxy',
+      provider: 'api-football',
+      hasToken: Boolean(apiFootballToken),
+      baseUrl: apiFootballBaseUrl,
+      snapshotPath,
+      collectorStatePath,
+      snapshotCount: await getSnapshotCount(),
+      collector: collectorState,
+    });
+    return;
+  }
+
+  if (incomingUrl.pathname === '/api/football/collector/status') {
+    sendJson(response, 200, {
+      ok: true,
+      snapshotCount: await getSnapshotCount(),
+      collector: collectorState,
+    });
+    return;
+  }
+
+  if (incomingUrl.pathname === '/api/football/collector/run') {
+    const result = await runCollector({ reason: 'manual' });
+    sendJson(response, result.ok ? 200 : 502, {
+      ...result,
+      snapshotCount: await getSnapshotCount(),
+    });
+    return;
+  }
+
+  if (!incomingUrl.pathname.startsWith('/api/football')) {
+    sendJson(response, 404, {
+      message: 'Rota nao encontrada.',
+    });
+    return;
+  }
+
+  if (!apiFootballToken) {
+    sendJson(response, 500, {
+      code: 'API_FOOTBALL_TOKEN_MISSING',
+      message: 'Configure API_FOOTBALL_TOKEN no backend.',
+    });
+    return;
+  }
+
+  try {
+    const body = ['GET', 'HEAD'].includes(request.method ?? '') ? undefined : await readBody(request);
+    const { targetUrl, apiPath } = buildTargetUrl(request.url ?? '/');
+    const targetResponse = await fetch(targetUrl, {
+      method: request.method,
+      headers: {
+        Accept: 'application/json',
+        'x-apisports-key': apiFootballToken,
+        ...(request.headers['content-type'] ? { 'Content-Type': request.headers['content-type'] } : {}),
+      },
+      body,
+    });
+
+    const contentType = targetResponse.headers.get('content-type') ?? 'application/json; charset=utf-8';
+    const responseBody = Buffer.from(await targetResponse.arrayBuffer());
+
+    if (request.method === 'GET' && targetResponse.ok && contentType.includes('application/json')) {
+      const payload = JSON.parse(responseBody.toString('utf8'));
+      await persistSnapshot({
+        kind: getSnapshotKind(apiPath, targetUrl.searchParams),
+        apiPath,
+        query: Object.fromEntries(targetUrl.searchParams.entries()),
+        payload,
+      });
+    }
+
+    response.writeHead(targetResponse.status, {
+      'Content-Type': contentType,
+      'Access-Control-Allow-Origin': allowedOrigin,
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    });
+    response.end(responseBody);
+  } catch (error) {
+    sendJson(response, 502, {
+      code: 'API_FOOTBALL_PROXY_ERROR',
+      message: 'Nao foi possivel consultar a API-FOOTBALL.',
+      detail: error instanceof Error ? error.message : 'Erro desconhecido',
+    });
+  }
+});
+
+server.listen(port, () => {
+  console.log(`API-FOOTBALL proxy running at http://localhost:${port}`);
+  startCollector();
+});

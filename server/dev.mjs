@@ -36,11 +36,11 @@ const startProcess = (name, command, args, options = {}) => {
 };
 
 if (await isBackendRunning()) {
-  console.log(`API Futebol proxy already running at ${backendUrl}`);
+  console.log(`API-FOOTBALL proxy already running at ${backendUrl}`);
   processes = [startProcess('Vite dev server', process.execPath, ['server/frontendDev.mjs'])];
 } else {
   processes = [
-    startProcess('API Futebol proxy', process.execPath, ['server/apiFutebolProxy.mjs']),
+    startProcess('API-FOOTBALL proxy', process.execPath, ['server/apiFootballProxy.mjs']),
     startProcess('Vite dev server', process.execPath, ['server/frontendDev.mjs']),
   ];
 }

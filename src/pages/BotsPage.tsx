@@ -21,7 +21,7 @@ export function duplicateBot(bot: Bot): Bot {
   return {
     ...bot,
     id: uid('bot'),
-    name: `${bot.name} cópia`,
+    name: `${bot.name} copia`,
     createdAt: now,
     updatedAt: now,
   };
@@ -34,14 +34,14 @@ export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicat
     <>
       <PageHeader
         title="Bots"
-        description="Gerencie métodos, duplique variações e rode backtests em jogos históricos mockados."
+        description="Gerencie metodos, duplique variacoes e prepare backtests com dados reais quando houver historico compativel."
         action={<Button onClick={onCreate}>Criar Bot</Button>}
       />
 
       {bots.length === 0 ? (
         <EmptyState
-          title="Sua bancada de métodos está vazia"
-          description="Crie um bot com regras ao vivo ou pré-live para habilitar backtest, ranking e relatórios."
+          title="Sua bancada de metodos esta vazia"
+          description="Crie um bot com regras ao vivo ou pre-live para habilitar monitoramento, ranking e relatorios."
           action={<Button onClick={onCreate}>Criar Bot</Button>}
         />
       ) : (
@@ -58,7 +58,7 @@ export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicat
                   <th className="px-3 py-3">Regras</th>
                   <th className="px-3 py-3">Status</th>
                   <th className="px-3 py-3">ROI</th>
-                  <th className="px-3 py-3 text-right">Ações</th>
+                  <th className="px-3 py-3 text-right">Acoes</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/8">
@@ -68,9 +68,9 @@ export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicat
                     <tr key={bot.id} className="text-slate-300">
                       <td className="px-3 py-4">
                         <p className="font-semibold text-white">{bot.name}</p>
-                        <p className="line-clamp-1 text-xs text-slate-500">{bot.description || 'Sem descrição'}</p>
+                        <p className="line-clamp-1 text-xs text-slate-500">{bot.description || 'Sem descricao'}</p>
                       </td>
-                      <td className="px-3 py-4">{bot.mode === 'live' ? 'ao vivo' : 'pré-live'}</td>
+                      <td className="px-3 py-4">{bot.mode === 'live' ? 'ao vivo' : 'pre-live'}</td>
                       <td className="px-3 py-4">{bot.market || '-'}</td>
                       <td className="px-3 py-4">{bot.operation || '-'}</td>
                       <td className="px-3 py-4">

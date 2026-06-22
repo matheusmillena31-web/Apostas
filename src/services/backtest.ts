@@ -1,4 +1,3 @@
-import { historicalGames, mockGames } from '../data/mockGames';
 import { BacktestResult, Bot, BotLog, BotRule, Game, GameSnapshot, MethodRanking, TradeEntry, TradeSide } from '../types';
 import { uid } from '../utils/formatters';
 
@@ -267,7 +266,7 @@ const leagueExtremes = (entries: TradeEntry[]) => {
   };
 };
 
-export const runBacktest = (bot: Bot, games: Game[] = historicalGames): { result: BacktestResult; logs: BotLog[] } => {
+export const runBacktest = (bot: Bot, games: Game[] = []): { result: BacktestResult; logs: BotLog[] } => {
   const backtestBot: Bot = { ...bot, stake: 1 };
   const entries: TradeEntry[] = [];
   const logs: BotLog[] = [];
@@ -370,17 +369,4 @@ export const runAllRankings = (bots: Bot[]): MethodRanking[] =>
     })
     .sort((a, b) => b.roi - a.roi);
 
-export const liveEntryPreview = (bots: Bot[]) =>
-  mockGames
-    .filter((game) => game.status === 'ao-vivo')
-    .flatMap((game) => {
-      const snapshot = game.snapshots[game.currentMinute];
-      return bots
-        .filter((bot) => bot.isActive)
-        .map((bot) => ({
-          game,
-          bot,
-          snapshot,
-          decision: shouldEnter(bot, game, snapshot),
-        }));
-    });
+export const liveEntryPreview = (_bots: Bot[]) => [];

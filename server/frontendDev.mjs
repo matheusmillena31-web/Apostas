@@ -6,7 +6,7 @@ const server = await createServer({
   plugins: [react()],
   server: {
     proxy: {
-      '/api/futebol': {
+      '/api/football': {
         target: 'http://localhost:3333',
         changeOrigin: true,
       },

@@ -1,6 +1,6 @@
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-const API_FUTEBOL_PROXY_BASE_URL = viteEnv?.VITE_API_FUTEBOL_PROXY_URL ?? '/api/futebol';
-const AUTH_ERROR_EVENT = 'api-futebol:auth-error';
+const API_FOOTBALL_PROXY_BASE_URL = viteEnv?.VITE_API_FOOTBALL_PROXY_URL ?? '/api/football';
+const AUTH_ERROR_EVENT = 'api-football:auth-error';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 type QueryValue = string | number | boolean | null | undefined;
@@ -36,7 +36,7 @@ export class ApiClientError extends Error {
   }
 }
 
-export const onApiFutebolAuthError = (handler: (detail: ApiAuthErrorDetail) => void) => {
+export const onApiFootballAuthError = (handler: (detail: ApiAuthErrorDetail) => void) => {
   const listener = (event: Event) => handler((event as CustomEvent<ApiAuthErrorDetail>).detail);
   window.addEventListener(AUTH_ERROR_EVENT, listener);
   return () => window.removeEventListener(AUTH_ERROR_EVENT, listener);
@@ -44,7 +44,7 @@ export const onApiFutebolAuthError = (handler: (detail: ApiAuthErrorDetail) => v
 
 const buildUrl = (path: string, query?: Record<string, QueryValue>) => {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const normalizedBaseUrl = API_FUTEBOL_PROXY_BASE_URL.replace(/\/$/, '');
+  const normalizedBaseUrl = API_FOOTBALL_PROXY_BASE_URL.replace(/\/$/, '');
   const url = new URL(`${normalizedBaseUrl}${normalizedPath}`, window.location.origin);
 
   Object.entries(query ?? {}).forEach(([key, value]) => {
@@ -83,7 +83,7 @@ const dispatchAuthError = (payload: unknown) => {
     new CustomEvent<ApiAuthErrorDetail>(AUTH_ERROR_EVENT, {
       detail: {
         status: 401,
-        message: 'Token da API Futebol invalido, expirado ou ausente.',
+        message: 'Token da API-FOOTBALL invalido, expirado ou ausente.',
         payload,
       },
     }),
@@ -113,9 +113,9 @@ export const apiClient = async <TResponse>(
   const payload = await parseResponse(response);
 
   if (!response.ok) {
-    const error = new ApiClientError(`Erro ${response.status} ao consultar a API Futebol.`, response, payload);
+    const error = new ApiClientError(`Erro ${response.status} ao consultar a API-FOOTBALL.`, response, payload);
 
-    if (error.isAuthError) {
+    if (error.isAuthError || error.status === 403) {
       dispatchAuthError(payload);
     }
 
@@ -125,5 +125,5 @@ export const apiClient = async <TResponse>(
   return payload as TResponse;
 };
 
-export const apiFutebolBaseUrl = API_FUTEBOL_PROXY_BASE_URL;
-export const apiFutebolAuthErrorEvent = AUTH_ERROR_EVENT;
+export const apiFootballBaseUrl = API_FOOTBALL_PROXY_BASE_URL;
+export const apiFootballAuthErrorEvent = AUTH_ERROR_EVENT;

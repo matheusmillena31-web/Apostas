@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Info, Pause, Play, RotateCcw, Search, SkipBack, SkipForward } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { EmptyState } from '../components/EmptyState';
 import { Input } from '../components/FormControls';
 import { PageHeader } from '../components/PageHeader';
-import { historicalGames } from '../data/mockGames';
 import { shouldEnter } from '../services/backtest';
-import { Bot, LiveStats } from '../types';
+import { Bot, Game, LiveStats } from '../types';
 
 type ReplayPageProps = {
   bots: Bot[];
@@ -60,6 +60,7 @@ type PendingEntry = {
 const MAX_REPLAY_MINUTE = 120;
 const DEFAULT_REPLAY_STAKE = 50;
 const goalLines = [0.5, 1.5, 2.5, 3.5, 4.5];
+const historicalGames: Game[] = [];
 
 const clampOdd = (odd: number) => Number(Math.max(1.01, Math.min(50, odd)).toFixed(2));
 const layFromBack = (odd: number) => clampOdd(odd + (odd < 2 ? 0.02 : odd < 5 ? 0.05 : 0.12));
@@ -500,6 +501,21 @@ function StatComparison({ label, home, away, suffix = '' }: { label: string; hom
 }
 
 export function ReplayPage({ bots, delay }: ReplayPageProps) {
+  if (historicalGames.length === 0) {
+    return (
+      <>
+        <PageHeader
+          title="Replay de jogos"
+          description="Replay completo sera liberado usando os snapshots de fixtures, estatisticas, eventos e odds live gravados pelo backend."
+        />
+        <EmptyState
+          title="Base historica em construcao"
+          description="A API-FOOTBALL entrega dados ao vivo, mas o historico minuto a minuto precisa ser construido gravando snapshots desde agora. Abra Jogos ao vivo para iniciar capturas."
+        />
+      </>
+    );
+  }
+
   const [gameId, setGameId] = useState(historicalGames[0]?.id ?? '');
   const [minute, setMinute] = useState(0);
   const [playing, setPlaying] = useState(false);
