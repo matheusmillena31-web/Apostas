@@ -1,7 +1,8 @@
-import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { createServer } from 'vite';
 
-export default defineConfig({
+const server = await createServer({
+  configFile: false,
   plugins: [react()],
   server: {
     proxy: {
@@ -12,3 +13,6 @@ export default defineConfig({
     },
   },
 });
+
+await server.listen();
+server.printUrls();

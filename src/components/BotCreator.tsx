@@ -47,7 +47,7 @@ const createBotConfig = (): BotConfig => ({
   name: '',
   description: '',
   market: 'Over 2.5',
-  side: 'BACK',
+  operation: 'BACK',
   stake: 10,
   logic: 'AND',
   filters: [createFilterRule()],
@@ -164,8 +164,8 @@ export function BotCreator({ initialConfig, onChange, onSave }: BotCreatorProps)
             <label className="block">
               <span className="mb-2 block text-sm font-medium text-zinc-300">BACK ou LAY</span>
               <select
-                value={config.side}
-                onChange={(event) => updateField('side', event.target.value as BotConfig['side'])}
+                value={config.operation}
+                onChange={(event) => updateField('operation', event.target.value as BotConfig['operation'])}
                 className="min-h-10 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               >
                 <option>BACK</option>

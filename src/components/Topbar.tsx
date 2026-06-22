@@ -10,7 +10,6 @@ type TopbarProps = {
 const mobileItems: Array<{ key: PageKey; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'bots', label: 'Bots' },
-  { key: 'newBot', label: 'Novo Bot' },
   { key: 'backtest', label: 'Backtest' },
   { key: 'reports', label: 'Relatórios' },
   { key: 'settings', label: 'Configurações' },

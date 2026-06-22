@@ -62,7 +62,7 @@ export interface BotConfig {
   name: string;
   description: string;
   market: string;
-  side: 'BACK' | 'LAY';
+  operation: 'BACK' | 'LAY';
   stake: number;
   logic: Extract<LogicalOperator, 'AND' | 'OR'>;
   filters: BotFilterRule[];

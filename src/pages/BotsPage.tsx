@@ -35,14 +35,14 @@ export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicat
       <PageHeader
         title="Bots"
         description="Gerencie métodos, duplique variações e rode backtests em jogos históricos mockados."
-        action={<Button onClick={onCreate}>Novo bot</Button>}
+        action={<Button onClick={onCreate}>Criar Bot</Button>}
       />
 
       {bots.length === 0 ? (
         <EmptyState
           title="Sua bancada de métodos está vazia"
           description="Crie um bot com regras ao vivo ou pré-live para habilitar backtest, ranking e relatórios."
-          action={<Button onClick={onCreate}>Criar bot</Button>}
+          action={<Button onClick={onCreate}>Criar Bot</Button>}
         />
       ) : (
         <Card>
@@ -54,8 +54,8 @@ export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicat
                   <th className="px-3 py-3">Modo</th>
                   <th className="px-3 py-3">Mercado</th>
                   <th className="px-3 py-3">BACK/LAY</th>
-                  <th className="px-3 py-3">Odd</th>
-                  <th className="px-3 py-3">Minuto</th>
+                  <th className="px-3 py-3">Odd entrada</th>
+                  <th className="px-3 py-3">Regras</th>
                   <th className="px-3 py-3">Status</th>
                   <th className="px-3 py-3">ROI</th>
                   <th className="px-3 py-3 text-right">Ações</th>
@@ -70,11 +70,22 @@ export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicat
                         <p className="font-semibold text-white">{bot.name}</p>
                         <p className="line-clamp-1 text-xs text-slate-500">{bot.description || 'Sem descrição'}</p>
                       </td>
-                      <td className="px-3 py-4">{bot.mode}</td>
-                      <td className="px-3 py-4">{bot.market}</td>
-                      <td className="px-3 py-4">{bot.side}</td>
-                      <td className="px-3 py-4">{bot.minOdd.toFixed(2)} - {bot.maxOdd.toFixed(2)}</td>
-                      <td className="px-3 py-4">{bot.entryMinute}' até {bot.limitMinute}'</td>
+                      <td className="px-3 py-4">{bot.mode === 'live' ? 'ao vivo' : 'pré-live'}</td>
+                      <td className="px-3 py-4">{bot.market || '-'}</td>
+                      <td className="px-3 py-4">{bot.operation || '-'}</td>
+                      <td className="px-3 py-4">
+                        {bot.minOdd !== undefined || bot.maxOdd !== undefined ? (
+                          <div>
+                            <p className="font-semibold text-white">
+                              {bot.minOdd?.toFixed(2) ?? '-'} ate {bot.maxOdd?.toFixed(2) ?? '-'}
+                            </p>
+                            <p className="line-clamp-1 text-xs text-slate-500">{bot.oddMarket || 'Odd do mercado da aposta'}</p>
+                          </div>
+                        ) : (
+                          '-'
+                        )}
+                      </td>
+                      <td className="px-3 py-4">{bot.rules.filter((rule) => rule.parameter).length}</td>
                       <td className="px-3 py-4">
                         <span className={`rounded-full px-2.5 py-1 text-xs ${bot.isActive ? 'bg-emerald-500/12 text-emerald-300' : 'bg-slate-500/12 text-slate-400'}`}>
                           {bot.isActive ? 'Ativo' : 'Inativo'}

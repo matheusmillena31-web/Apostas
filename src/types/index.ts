@@ -1,7 +1,9 @@
-export type BotMode = 'pre-live' | 'ao-vivo';
+export type BotMode = 'pre-live' | 'live';
 export type TradeSide = 'BACK' | 'LAY';
 export type Sport = 'Futebol';
 export type GameStatus = 'ao-vivo' | 'historico' | 'agendado';
+export type BotRuleOperator = '>=' | '<=' | '=' | '!=' | 'between';
+export type BotRuleConnector = 'AND' | 'OR' | 'NOT';
 
 export interface LiveStats {
   shots: number;
@@ -55,53 +57,40 @@ export interface Game {
   snapshots: GameSnapshot[];
 }
 
-export interface LiveRuleSet {
-  minShots?: number;
-  minShotsOnTarget?: number;
-  minDangerousAttacks?: number;
-  minCorners?: number;
-  minPossession?: number;
-  maxCards?: number;
-  minOffensivePressure?: number;
-  minRecentShots?: number;
-  score?: string;
-  currentOddMin?: number;
-  currentOddMax?: number;
+export interface BotRule {
+  id: string;
+  mode: BotMode;
+  parameter: string;
+  operator: BotRuleOperator;
+  value: string | number;
+  secondValue?: string | number;
+  connector?: BotRuleConnector;
 }
 
-export interface PreLiveRuleSet {
-  minPreLiveOdd?: number;
-  maxPreLiveOdd?: number;
-  leagues?: string;
-  teams?: string;
-  minAverageGoals?: number;
-  minAverageCorners?: number;
-  minH2HGoals?: number;
-  maxTablePositionGap?: number;
-  minFavoritism?: number;
+export interface BotCashOutConfig {
+  enabled: boolean;
+  fromMinute?: number;
+  toMinute?: number;
+  exitRules: BotRule[];
 }
 
 export interface Bot {
   id: string;
   name: string;
-  description: string;
+  description?: string;
   isActive: boolean;
   mode: BotMode;
-  sport: Sport;
-  market: string;
-  side: TradeSide;
-  minOdd: number;
-  maxOdd: number;
-  targetOdd: number;
-  entryMinute: number;
-  limitMinute: number;
-  exitMinute: number;
-  stake: number;
-  scoreFilter: string;
-  leagues: string;
-  teams: string;
-  liveRules: LiveRuleSet;
-  preLiveRules: PreLiveRuleSet;
+  sport?: Sport;
+  market?: string;
+  oddMarket?: string;
+  operation?: TradeSide;
+  minOdd?: number;
+  maxOdd?: number;
+  stake?: number;
+  rules: BotRule[];
+  includedLeagues?: string[];
+  excludedLeagues?: string[];
+  cashOut?: BotCashOutConfig;
   createdAt: string;
   updatedAt: string;
 }
@@ -115,7 +104,7 @@ export interface TradeEntry {
   league: string;
   minute: number;
   market: string;
-  side: TradeSide;
+  operation: TradeSide;
   odd: number;
   stake: number;
   result: 'green' | 'red';
@@ -163,7 +152,7 @@ export interface MethodRanking {
   reds: number;
   accuracy: number;
   mode: BotMode;
-  market: string;
+  market?: string;
 }
 
 export interface AppSettings {

@@ -12,8 +12,8 @@ export function BotEditor({ bot, defaultStake, onSave }: BotEditorProps) {
   return (
     <>
       <PageHeader
-        title={bot ? 'Editar Bot' : 'Novo Bot'}
-        description="Crie métodos de trade esportivo para simulação, replay e backtest usando apenas dados locais."
+        title={bot ? 'Editar Bot' : 'Criar Bot'}
+        description="Crie métodos de trade esportivo para simulação, replay e backtest usando regras dinâmicas."
       />
       <BotForm initialBot={bot} defaultStake={defaultStake} onSave={onSave} />
     </>

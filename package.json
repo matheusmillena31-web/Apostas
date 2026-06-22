@@ -4,18 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "dev": "node server/dev.mjs",
+    "dev:frontend": "node server/frontendDev.mjs",
+    "dev:backend": "node server/apiFutebolProxy.mjs",
+    "build": "tsc -b && node server/frontendBuild.mjs",
+    "preview": "node server/frontendPreview.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "lucide-react": "^0.468.0",
-    "recharts": "^2.13.3",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "recharts": "^2.13.3"
   },
   "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",

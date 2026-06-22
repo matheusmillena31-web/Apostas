@@ -34,7 +34,7 @@ export function TradingExecution({ bots }: TradingExecutionProps) {
                 </div>
                 <div className="rounded-md bg-ink-900 p-3">
                   <p className="text-xs text-slate-500">Mercado</p>
-                  <p className="text-xl font-semibold text-white">{bot.market}</p>
+                  <p className="text-xl font-semibold text-white">{bot.market ?? 'Match Odds'}</p>
                 </div>
                 <div className="rounded-md bg-ink-900 p-3">
                   <p className="text-xs text-slate-500">Odd</p>

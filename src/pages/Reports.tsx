@@ -39,7 +39,7 @@ export function Reports({ results, bots }: ReportsProps) {
   const leagueData = Object.entries(profitByLeague).map(([league, profit]) => ({ league, profit: Number(profit.toFixed(2)) }));
   const modeData = results.map((result) => {
     const mode = botById.get(result.botId)?.mode;
-    return { name: result.botName, preLive: mode === 'pre-live' ? result.roi : 0, aoVivo: mode === 'ao-vivo' ? result.roi : 0 };
+    return { name: result.botName, preLive: mode === 'pre-live' ? result.roi : 0, aoVivo: mode === 'live' ? result.roi : 0 };
   });
 
   return (

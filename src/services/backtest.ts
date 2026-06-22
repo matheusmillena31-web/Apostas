@@ -1,140 +1,255 @@
 import { historicalGames, mockGames } from '../data/mockGames';
-import { BacktestResult, Bot, BotLog, Game, GameSnapshot, MethodRanking, TradeEntry } from '../types';
-import { includesAny, splitList, uid } from '../utils/formatters';
+import { BacktestResult, Bot, BotLog, BotRule, Game, GameSnapshot, MethodRanking, TradeEntry, TradeSide } from '../types';
+import { uid } from '../utils/formatters';
 
-const getMarketOdd = (bot: Bot, snapshot: GameSnapshot, game: Game) => {
-  const market = bot.market.toLowerCase();
-  if (market.includes('over 1.5')) return snapshot.over15Odd;
-  if (market.includes('over 2.5')) return snapshot.over25Odd;
-  if (market.includes('under 2.5')) return snapshot.under25Odd;
-  if (market.includes('ambas')) return snapshot.bttsOdd;
+const clampOdd = (odd: number) => Number(Math.max(1.01, Math.min(50, odd)).toFixed(2));
+
+const parseGoalMarket = (marketName: string | undefined) => {
+  const market = (marketName ?? '').toLowerCase().replace(',', '.');
+  const type = market.includes('over') ? 'over' : market.includes('under') ? 'under' : undefined;
+  if (!type) return undefined;
+
+  const lineMatch = market.match(/(?:over|under)[^\d]*(\d+(?:\.\d+)?)/) ?? market.match(/\+\s*(\d+(?:\.\d+)?)/);
+  const line = lineMatch ? Number(lineMatch[1]) : undefined;
+  if (!line || !Number.isFinite(line)) return undefined;
+
+  return { type, line } as const;
+};
+
+const getGoalLineOdd = (type: 'over' | 'under', line: number, snapshot: GameSnapshot) => {
+  if (type === 'over') {
+    if (line <= 1.5) return clampOdd(snapshot.over15Odd - (1.5 - line) * 0.35);
+    if (line <= 2.5) return clampOdd(snapshot.over15Odd + (snapshot.over25Odd - snapshot.over15Odd) * (line - 1.5));
+    return clampOdd(snapshot.over25Odd + (line - 2.5) * 0.75);
+  }
+
+  if (line <= 2.5) return clampOdd(snapshot.under25Odd + (2.5 - line) * 0.55);
+  return clampOdd(snapshot.under25Odd - (line - 2.5) * 0.35);
+};
+
+const getOddForMarket = (marketName: string | undefined, snapshot: GameSnapshot, game: Game) => {
+  const market = (marketName ?? '').toLowerCase();
+  const goalMarket = parseGoalMarket(marketName);
+
+  if (goalMarket) return getGoalLineOdd(goalMarket.type, goalMarket.line, snapshot);
+  if (market.includes('ambas') || market.includes('btts')) return snapshot.bttsOdd;
   if (market.includes('empate')) return snapshot.drawOdd;
+  if (market.includes('casa') || market.includes('mandante')) return snapshot.homeOdd;
+  if (market.includes('fora') || market.includes('visitante')) return snapshot.awayOdd;
+  if (market.includes('dupla chance')) return Math.min(snapshot.homeOdd, snapshot.drawOdd, snapshot.awayOdd);
+
   return game.preLive.homeOdd <= game.preLive.awayOdd ? snapshot.homeOdd : snapshot.awayOdd;
 };
 
-const matchesScore = (filter: string, snapshot: GameSnapshot) => {
-  if (!filter.trim()) return true;
-  return filter.trim() === `${snapshot.scoreHome}-${snapshot.scoreAway}`;
+const getEntryOdd = (bot: Bot, snapshot: GameSnapshot, game: Game) =>
+  getOddForMarket(bot.market ?? bot.oddMarket, snapshot, game);
+
+const getFilterOdd = (bot: Bot, snapshot: GameSnapshot, game: Game) =>
+  getOddForMarket(bot.oddMarket ?? bot.market, snapshot, game);
+
+const includesText = (source: string, filters?: string[]) => {
+  const normalized = normalizeText(source);
+  const activeFilters = (filters ?? []).map(normalizeText).filter(Boolean);
+  if (activeFilters.length === 0) return false;
+  return activeFilters.some((filter) => normalized.includes(filter));
 };
 
-const passesBaseRules = (bot: Bot, game: Game, snapshot: GameSnapshot) => {
-  const odd = getMarketOdd(bot, snapshot, game);
-  const leagueFilters = splitList(bot.leagues);
-  const teamFilters = splitList(bot.teams);
-  const teams = `${game.homeTeam} ${game.awayTeam}`;
+const normalizeText = (value: unknown) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
 
-  if (snapshot.minute < bot.entryMinute || snapshot.minute > bot.limitMinute) {
-    return { passed: false, reason: 'Fora da janela de entrada', odd };
+const toNumber = (value: unknown) => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
   }
-  if (odd < bot.minOdd || odd > bot.maxOdd) {
-    return { passed: false, reason: 'Odd fora do intervalo configurado', odd };
-  }
-  if (!matchesScore(bot.scoreFilter, snapshot)) {
-    return { passed: false, reason: 'Placar diferente do filtro', odd };
-  }
-  if (!includesAny(game.league, leagueFilters)) {
-    return { passed: false, reason: 'Liga fora do filtro', odd };
-  }
-  if (!includesAny(teams, teamFilters)) {
-    return { passed: false, reason: 'Times fora do filtro', odd };
-  }
-
-  return { passed: true, reason: 'Regras base aprovadas', odd };
+  return null;
 };
 
-const passesLiveRules = (bot: Bot, snapshot: GameSnapshot, currentOdd: number) => {
-  const rule = bot.liveRules;
+const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapshot, odd: number): unknown => {
   const stats = snapshot.stats;
 
-  if (rule.minShots && stats.shots < rule.minShots) return { passed: false, reason: 'Finalizações abaixo do mínimo' };
-  if (rule.minShotsOnTarget && stats.shotsOnTarget < rule.minShotsOnTarget) {
-    return { passed: false, reason: 'Finalizações no alvo abaixo do mínimo' };
-  }
-  if (rule.minDangerousAttacks && stats.dangerousAttacks < rule.minDangerousAttacks) {
-    return { passed: false, reason: 'Ataques perigosos insuficientes' };
-  }
-  if (rule.minCorners && stats.corners < rule.minCorners) return { passed: false, reason: 'Escanteios abaixo do mínimo' };
-  if (rule.minPossession && stats.possession < rule.minPossession) return { passed: false, reason: 'Posse abaixo do mínimo' };
-  if (rule.maxCards && stats.cards > rule.maxCards) return { passed: false, reason: 'Cartões acima do limite' };
-  if (rule.minOffensivePressure && stats.offensivePressure < rule.minOffensivePressure) {
-    return { passed: false, reason: 'Pressão ofensiva insuficiente' };
-  }
-  if (rule.minRecentShots && stats.recentShots < rule.minRecentShots) {
-    return { passed: false, reason: 'Chutes recentes insuficientes' };
-  }
-  if (rule.currentOddMin && currentOdd < rule.currentOddMin) return { passed: false, reason: 'Odd atual abaixo da regra' };
-  if (rule.currentOddMax && currentOdd > rule.currentOddMax) return { passed: false, reason: 'Odd atual acima da regra' };
-  if (rule.score && !matchesScore(rule.score, snapshot)) return { passed: false, reason: 'Placar ao vivo fora da regra' };
+  if (rule.mode === 'live') {
+    const liveValues: Record<string, unknown> = {
+      minute: snapshot.minute,
+      score: `${snapshot.scoreHome}-${snapshot.scoreAway}`,
+      goals: snapshot.scoreHome + snapshot.scoreAway,
+      corners: stats.corners,
+      possession: stats.possession,
+      shots: stats.shots,
+      shotsOnTarget: stats.shotsOnTarget,
+      attacks: stats.shots + stats.dangerousAttacks,
+      dangerousAttacks: stats.dangerousAttacks,
+      cards: stats.cards,
+      substitutions: undefined,
+      offensivePressure: stats.offensivePressure,
+      recentEvents: snapshot.events.join(' '),
+      liveOdds: odd,
+      statDifference: Math.abs(stats.shots - stats.shotsOnTarget),
+    };
 
-  return { passed: true, reason: 'Regras ao vivo aprovadas' };
+    return liveValues[rule.parameter];
+  }
+
+  const preLiveValues: Record<string, unknown> = {
+    championship: game.league,
+    season: undefined,
+    homeTeam: game.homeTeam,
+    awayTeam: game.awayTeam,
+    tablePosition: game.preLive.tablePositionGap,
+    performance: undefined,
+    averageGoals: game.preLive.averageGoals,
+    averageCorners: game.preLive.averageCorners,
+    averageCards: undefined,
+    winningStreak: undefined,
+    losingStreak: undefined,
+    headToHead: game.preLive.h2hGoals,
+    offensiveStrength: undefined,
+    defensiveStrength: undefined,
+    favoritism: game.preLive.favoritism,
+    preLiveOdds: odd,
+  };
+
+  return preLiveValues[rule.parameter];
 };
 
-const passesPreLiveRules = (bot: Bot, game: Game, odd: number) => {
-  const rule = bot.preLiveRules;
+const compareRule = (actual: unknown, rule: BotRule) => {
+  if (actual === undefined || actual === null) return false;
 
-  if (rule.minPreLiveOdd && odd < rule.minPreLiveOdd) return { passed: false, reason: 'Odd pre-live abaixo do mínimo' };
-  if (rule.maxPreLiveOdd && odd > rule.maxPreLiveOdd) return { passed: false, reason: 'Odd pre-live acima do máximo' };
-  if (rule.leagues && !includesAny(game.league, splitList(rule.leagues))) return { passed: false, reason: 'Liga pre-live fora da regra' };
-  if (rule.teams && !includesAny(`${game.homeTeam} ${game.awayTeam}`, splitList(rule.teams))) {
-    return { passed: false, reason: 'Times pre-live fora da regra' };
-  }
-  if (rule.minAverageGoals && game.preLive.averageGoals < rule.minAverageGoals) {
-    return { passed: false, reason: 'Média de gols abaixo da regra' };
-  }
-  if (rule.minAverageCorners && game.preLive.averageCorners < rule.minAverageCorners) {
-    return { passed: false, reason: 'Média de escanteios abaixo da regra' };
-  }
-  if (rule.minH2HGoals && game.preLive.h2hGoals < rule.minH2HGoals) {
-    return { passed: false, reason: 'H2H abaixo da regra' };
-  }
-  if (rule.maxTablePositionGap && game.preLive.tablePositionGap > rule.maxTablePositionGap) {
-    return { passed: false, reason: 'Distância na tabela acima do limite' };
-  }
-  if (rule.minFavoritism && game.preLive.favoritism < rule.minFavoritism) {
-    return { passed: false, reason: 'Favoritismo abaixo do mínimo' };
+  if (rule.operator === '=' || rule.operator === '!=') {
+    const actualNumber = toNumber(actual);
+    const expectedNumber = toNumber(rule.value);
+    const equal =
+      actualNumber !== null && expectedNumber !== null
+        ? actualNumber === expectedNumber
+        : normalizeText(actual) === normalizeText(rule.value);
+
+    return rule.operator === '=' ? equal : !equal;
   }
 
-  return { passed: true, reason: 'Regras pre-live aprovadas' };
+  if (rule.operator === 'between') {
+    const actualNumber = toNumber(actual);
+    const min = toNumber(rule.value);
+    const max = toNumber(rule.secondValue);
+    return actualNumber !== null && min !== null && max !== null && actualNumber >= min && actualNumber <= max;
+  }
+
+  const actualNumber = toNumber(actual);
+  const expectedNumber = toNumber(rule.value);
+  if (actualNumber === null || expectedNumber === null) return false;
+
+  return rule.operator === '>=' ? actualNumber >= expectedNumber : actualNumber <= expectedNumber;
+};
+
+const evaluateRuleList = (rules: BotRule[], bot: Bot, game: Game, snapshot: GameSnapshot, odd: number) => {
+  const evaluations = rules.map((rule) => ({
+    rule,
+    passed: compareRule(getRuleValue(rule, bot, game, snapshot, odd), rule),
+  }));
+
+  const passed = evaluations.reduce((acc, item, index) => {
+    if (index === 0) return item.rule.connector === 'NOT' ? !item.passed : item.passed;
+
+    switch (item.rule.connector ?? 'AND') {
+      case 'OR':
+        return acc || item.passed;
+      case 'NOT':
+        return acc && !item.passed;
+      case 'AND':
+      default:
+        return acc && item.passed;
+    }
+  }, true);
+
+  return {
+    passed,
+    reason: passed ? 'Parâmetros dinâmicos aprovados' : 'Parâmetros dinâmicos reprovados',
+  };
+};
+
+const evaluateDynamicRules = (bot: Bot, game: Game, snapshot: GameSnapshot, odd: number) => {
+  const rules = bot.rules.filter((rule) => rule.mode === bot.mode && rule.parameter);
+  if (rules.length === 0) return { passed: true, reason: 'Sem parâmetros obrigatórios' };
+  return evaluateRuleList(rules, bot, game, snapshot, odd);
+};
+
+const passesOddFilter = (bot: Bot, odd: number) => {
+  if (bot.minOdd !== undefined && odd < bot.minOdd) return { passed: false, reason: 'Odd abaixo da mínima configurada' };
+  if (bot.maxOdd !== undefined && odd > bot.maxOdd) return { passed: false, reason: 'Odd acima da máxima configurada' };
+  return { passed: true, reason: 'Odd dentro do intervalo' };
 };
 
 export const shouldEnter = (bot: Bot, game: Game, snapshot: GameSnapshot) => {
-  const base = passesBaseRules(bot, game, snapshot);
-  if (!base.passed) return { passed: false, odd: base.odd, reason: base.reason };
+  const odd = getEntryOdd(bot, snapshot, game);
+  const filterOdd = getFilterOdd(bot, snapshot, game);
 
-  const modeRules =
-    bot.mode === 'ao-vivo' ? passesLiveRules(bot, snapshot, base.odd) : passesPreLiveRules(bot, game, base.odd);
+  if ((bot.includedLeagues ?? []).length > 0 && !includesText(game.league, bot.includedLeagues)) {
+    return { passed: false, odd, reason: 'Liga fora do filtro selecionado' };
+  }
 
-  return { passed: modeRules.passed, odd: base.odd, reason: modeRules.reason };
+  if (includesText(game.league, bot.excludedLeagues)) {
+    return { passed: false, odd, reason: 'Liga excluída pelo filtro' };
+  }
+
+  const oddFilter = passesOddFilter(bot, filterOdd);
+  if (!oddFilter.passed) return { passed: false, odd, reason: oddFilter.reason };
+
+  const rules = evaluateDynamicRules(bot, game, snapshot, filterOdd);
+  return { passed: rules.passed, odd, reason: rules.reason };
+};
+
+const getCashOut = (bot: Bot, game: Game, entrySnapshot: GameSnapshot, entryOdd: number) => {
+  const cashOut = bot.cashOut;
+  if (!cashOut?.enabled) return undefined;
+
+  const fromMinute = cashOut.fromMinute ?? entrySnapshot.minute;
+  const toMinute = cashOut.toMinute ?? 150;
+  const exitRules = cashOut.exitRules.filter((rule) => rule.parameter);
+
+  return game.snapshots.find((snapshot) => {
+    if (snapshot.minute < fromMinute || snapshot.minute > toMinute || snapshot.minute <= entrySnapshot.minute) return false;
+    if (exitRules.length === 0) return true;
+    const currentOdd = getEntryOdd(bot, snapshot, game);
+    return evaluateRuleList(exitRules, bot, game, snapshot, currentOdd).passed;
+  });
+};
+
+const settleCashOut = (bot: Bot, entryOdd: number, exitOdd: number) => {
+  const operation: TradeSide = bot.operation ?? 'BACK';
+  const stake = 1;
+  const profit =
+    operation === 'BACK'
+      ? stake * ((entryOdd - exitOdd) / exitOdd)
+      : stake * ((exitOdd - entryOdd) / exitOdd);
+
+  return {
+    result: profit >= 0 ? 'green' : 'red',
+    profit: Number(profit.toFixed(2)),
+  } as const;
 };
 
 const getRawMarketGreen = (bot: Bot, game: Game) => {
   const totalGoals = game.finalScoreHome + game.finalScoreAway;
-  const market = bot.market.toLowerCase();
+  const market = (bot.market ?? bot.oddMarket ?? '').toLowerCase();
+  const goalMarket = parseGoalMarket(market);
 
-  if (market.includes('over 1.5')) return totalGoals >= 2;
-  if (market.includes('over 2.5')) return totalGoals >= 3;
-  if (market.includes('under 2.5')) return totalGoals <= 2;
+  if (goalMarket?.type === 'over') return totalGoals > goalMarket.line;
+  if (goalMarket?.type === 'under') return totalGoals < goalMarket.line;
   if (market.includes('ambas')) return game.finalScoreHome > 0 && game.finalScoreAway > 0;
   if (market.includes('empate')) return game.finalScoreHome === game.finalScoreAway;
 
   const favoriteIsHome = game.preLive.homeOdd <= game.preLive.awayOdd;
-  const favoriteWon = favoriteIsHome
-    ? game.finalScoreHome > game.finalScoreAway
-    : game.finalScoreAway > game.finalScoreHome;
-
-  return favoriteWon;
+  return favoriteIsHome ? game.finalScoreHome > game.finalScoreAway : game.finalScoreAway > game.finalScoreHome;
 };
 
 const settleTrade = (bot: Bot, game: Game, odd: number) => {
+  const operation: TradeSide = bot.operation ?? 'BACK';
+  const stake = 1;
   const rawGreen = getRawMarketGreen(bot, game);
-  const green = bot.side === 'BACK' ? rawGreen : !rawGreen;
-  const profit = green
-    ? bot.side === 'BACK'
-      ? bot.stake * (odd - 1)
-      : bot.stake
-    : bot.side === 'BACK'
-      ? -bot.stake
-      : -bot.stake * (odd - 1);
+  const green = operation === 'BACK' ? rawGreen : !rawGreen;
+  const profit = green ? (operation === 'BACK' ? stake * (odd - 1) : stake) : operation === 'BACK' ? -stake : -stake * (odd - 1);
 
   return {
     result: green ? 'green' : 'red',
@@ -153,6 +268,7 @@ const leagueExtremes = (entries: TradeEntry[]) => {
 };
 
 export const runBacktest = (bot: Bot, games: Game[] = historicalGames): { result: BacktestResult; logs: BotLog[] } => {
+  const backtestBot: Bot = { ...bot, stake: 1 };
   const entries: TradeEntry[] = [];
   const logs: BotLog[] = [];
   const date = new Date().toISOString();
@@ -161,9 +277,9 @@ export const runBacktest = (bot: Bot, games: Game[] = historicalGames): { result
     let entered = false;
 
     for (const snapshot of game.snapshots) {
-      if (snapshot.minute > bot.limitMinute || entered) continue;
+      if (entered) continue;
 
-      const decision = shouldEnter(bot, game, snapshot);
+      const decision = shouldEnter(backtestBot, game, snapshot);
       const gameName = `${game.homeTeam} x ${game.awayTeam}`;
       logs.push({
         id: uid('log'),
@@ -173,14 +289,16 @@ export const runBacktest = (bot: Bot, games: Game[] = historicalGames): { result
         gameId: game.id,
         game: gameName,
         minute: snapshot.minute,
-        checkedRule: bot.mode === 'ao-vivo' ? 'Regras ao vivo' : 'Regras pre-live',
+        checkedRule: bot.mode === 'live' ? 'Regras ao vivo' : 'Regras pré-live',
         rulePassed: decision.passed,
         entryMade: decision.passed,
         reason: decision.reason,
       });
 
       if (decision.passed) {
-        const settled = settleTrade(bot, game, decision.odd);
+        const cashOutSnapshot = getCashOut(backtestBot, game, snapshot, decision.odd);
+        const cashOutOdd = cashOutSnapshot ? getEntryOdd(backtestBot, cashOutSnapshot, game) : undefined;
+        const settled = cashOutOdd ? settleCashOut(backtestBot, decision.odd, cashOutOdd) : settleTrade(backtestBot, game, decision.odd);
         entries.push({
           id: uid('entry'),
           botId: bot.id,
@@ -189,13 +307,15 @@ export const runBacktest = (bot: Bot, games: Game[] = historicalGames): { result
           game: gameName,
           league: game.league,
           minute: snapshot.minute,
-          market: bot.market,
-          side: bot.side,
+          market: backtestBot.market ?? backtestBot.oddMarket ?? 'Match Odds',
+          operation: backtestBot.operation ?? 'BACK',
           odd: decision.odd,
-          stake: bot.stake,
+          stake: 1,
           result: settled.result,
           profit: settled.profit,
-          reason: decision.reason,
+          reason: cashOutSnapshot
+            ? `${decision.reason}; cash-out no minuto ${cashOutSnapshot.minute} @ ${cashOutOdd?.toFixed(2)}`
+            : decision.reason,
           date,
         });
         entered = true;
@@ -232,21 +352,23 @@ export const runBacktest = (bot: Bot, games: Game[] = historicalGames): { result
 };
 
 export const runAllRankings = (bots: Bot[]): MethodRanking[] =>
-  bots.map((bot) => {
-    const { result } = runBacktest(bot);
-    return {
-      botId: bot.id,
-      botName: bot.name,
-      roi: result.roi,
-      profit: result.profit,
-      entries: result.totalEntries,
-      greens: result.greens,
-      reds: result.reds,
-      accuracy: result.totalEntries ? Number(((result.greens / result.totalEntries) * 100).toFixed(2)) : 0,
-      mode: bot.mode,
-      market: bot.market,
-    };
-  }).sort((a, b) => b.roi - a.roi);
+  bots
+    .map((bot) => {
+      const { result } = runBacktest(bot);
+      return {
+        botId: bot.id,
+        botName: bot.name,
+        roi: result.roi,
+        profit: result.profit,
+        entries: result.totalEntries,
+        greens: result.greens,
+        reds: result.reds,
+        accuracy: result.totalEntries ? Number(((result.greens / result.totalEntries) * 100).toFixed(2)) : 0,
+        mode: bot.mode,
+        market: bot.market,
+      };
+    })
+    .sort((a, b) => b.roi - a.roi);
 
 export const liveEntryPreview = (bots: Bot[]) =>
   mockGames

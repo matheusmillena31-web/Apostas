@@ -13,41 +13,33 @@ import { TradingExecution } from './pages/TradingExecution';
 import { BacktestPage } from './pages/BacktestPage';
 import { ReplayPage } from './pages/ReplayPage';
 import { Reports } from './pages/Reports';
-import { Indicators } from './pages/Indicators';
 import { Ranking } from './pages/Ranking';
-import { Logs } from './pages/Logs';
 import { SettingsPage } from './pages/SettingsPage';
 import { SystemStatus } from './pages/SystemStatus';
 
 export type PageKey =
   | 'dashboard'
   | 'bots'
-  | 'newBot'
   | 'liveGames'
   | 'gameLists'
   | 'trading'
   | 'backtest'
   | 'replay'
   | 'reports'
-  | 'indicators'
   | 'ranking'
-  | 'logs'
   | 'settings'
   | 'status';
 
 const titles: Record<PageKey, string> = {
   dashboard: 'Dashboard',
   bots: 'Bots',
-  newBot: 'Novo Bot',
   liveGames: 'Jogos ao vivo',
   gameLists: 'Listas de jogos',
   trading: 'Trading em execução',
   backtest: 'Backtest',
   replay: 'Replay de jogos',
   reports: 'Relatórios',
-  indicators: 'Indicadores',
   ranking: 'Ranking de métodos',
-  logs: 'Logs dos Bots',
   settings: 'Configurações',
   status: 'Status do Sistema',
 };
@@ -59,20 +51,30 @@ export default function App() {
   const [results, setResults] = useState<BacktestResult[]>(() => storage.getResults());
   const [settings, setSettings] = useState<AppSettings>(() => storage.getSettings());
   const [editingBot, setEditingBot] = useState<Bot | undefined>();
+  const [botEditorOpen, setBotEditorOpen] = useState(false);
   const [selectedBacktestBot, setSelectedBacktestBot] = useState<Bot | undefined>();
+  const [selectedBacktestResult, setSelectedBacktestResult] = useState<BacktestResult | undefined>();
 
   const rankings = useMemo(() => runAllRankings(bots), [bots]);
   const exportJson = useMemo(() => JSON.stringify(storage.exportAll(), null, 2), [bots, logs, results, settings]);
 
   const navigate = (nextPage: PageKey) => {
-    if (nextPage !== 'newBot') setEditingBot(undefined);
+    setEditingBot(undefined);
+    setBotEditorOpen(false);
     setPage(nextPage);
+  };
+
+  const openBotCreator = () => {
+    setEditingBot(undefined);
+    setBotEditorOpen(true);
+    setPage('bots');
   };
 
   const saveBot = (bot: Bot) => {
     const next = storage.upsertBot(bot);
     setBots(next);
     setEditingBot(undefined);
+    setBotEditorOpen(false);
     setPage('bots');
   };
 
@@ -82,6 +84,10 @@ export default function App() {
     setBots(next);
     storage.saveResults(nextResults);
     setResults(nextResults);
+    if (selectedBacktestBot?.id === botId) {
+      setSelectedBacktestBot(undefined);
+      setSelectedBacktestResult(undefined);
+    }
   };
 
   const duplicate = (bot: Bot) => {
@@ -98,6 +104,7 @@ export default function App() {
     const output = runBacktest(bot);
     saveBacktest(output.result, output.logs);
     setSelectedBacktestBot(bot);
+    setSelectedBacktestResult(output.result);
     setPage('backtest');
   };
 
@@ -132,24 +139,25 @@ export default function App() {
   const content = (() => {
     switch (page) {
       case 'dashboard':
-        return <Dashboard bots={bots} results={results} onCreateBot={() => navigate('newBot')} />;
+        return <Dashboard bots={bots} results={results} onCreateBot={openBotCreator} />;
       case 'bots':
-        return (
+        return botEditorOpen ? (
+          <BotEditor bot={editingBot} defaultStake={settings.defaultStake} onSave={saveBot} />
+        ) : (
           <BotsPage
             bots={bots}
             results={results}
-            onCreate={() => navigate('newBot')}
+            onCreate={openBotCreator}
             onEdit={(bot) => {
               setEditingBot(bot);
-              setPage('newBot');
+              setBotEditorOpen(true);
+              setPage('bots');
             }}
             onDelete={deleteBot}
             onDuplicate={duplicate}
             onBacktest={runBotBacktest}
           />
         );
-      case 'newBot':
-        return <BotEditor bot={editingBot} defaultStake={settings.defaultStake} onSave={saveBot} />;
       case 'liveGames':
         return <LiveGames bots={bots} />;
       case 'gameLists':
@@ -157,17 +165,23 @@ export default function App() {
       case 'trading':
         return <TradingExecution bots={bots} />;
       case 'backtest':
-        return <BacktestPage bots={bots} selectedBot={selectedBacktestBot} onResult={saveBacktest} />;
+        return (
+          <BacktestPage
+            bots={bots}
+            selectedBot={selectedBacktestBot}
+            initialResult={selectedBacktestResult}
+            onResult={(result, newLogs) => {
+              saveBacktest(result, newLogs);
+              setSelectedBacktestResult(result);
+            }}
+          />
+        );
       case 'replay':
         return <ReplayPage bots={bots} delay={settings.simulationDelay} />;
       case 'reports':
         return <Reports results={results} bots={bots} />;
-      case 'indicators':
-        return <Indicators results={results} />;
       case 'ranking':
         return <Ranking rankings={rankings} />;
-      case 'logs':
-        return <Logs logs={logs} />;
       case 'settings':
         return (
           <SettingsPage
