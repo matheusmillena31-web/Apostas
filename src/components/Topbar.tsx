@@ -10,9 +10,10 @@ type TopbarProps = {
 const mobileItems: Array<{ key: PageKey; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'bots', label: 'Bots' },
+  { key: 'liveGames', label: 'Jogos ao vivo' },
   { key: 'backtest', label: 'Backtest' },
-  { key: 'reports', label: 'Relatórios' },
-  { key: 'settings', label: 'Configurações' },
+  { key: 'reports', label: 'Relatorios' },
+  { key: 'status', label: 'Status' },
 ];
 
 export function Topbar({ title, activePage, onNavigate }: TopbarProps) {

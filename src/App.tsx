@@ -3,7 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { runAllRankings, runBacktest } from './services/backtest';
 import { storage } from './services/storage';
-import { Bot, BacktestResult, BotLog, AppSettings } from './types';
+import { Bot, BacktestResult, BotLog } from './types';
 import { Dashboard } from './pages/Dashboard';
 import { BotsPage, duplicateBot } from './pages/BotsPage';
 import { BotEditor } from './pages/BotEditor';
@@ -14,7 +14,6 @@ import { BacktestPage } from './pages/BacktestPage';
 import { ReplayPage } from './pages/ReplayPage';
 import { Reports } from './pages/Reports';
 import { Ranking } from './pages/Ranking';
-import { SettingsPage } from './pages/SettingsPage';
 import { SystemStatus } from './pages/SystemStatus';
 
 export type PageKey =
@@ -27,7 +26,6 @@ export type PageKey =
   | 'replay'
   | 'reports'
   | 'ranking'
-  | 'settings'
   | 'status';
 
 const titles: Record<PageKey, string> = {
@@ -35,12 +33,11 @@ const titles: Record<PageKey, string> = {
   bots: 'Bots',
   liveGames: 'Jogos ao vivo',
   gameLists: 'Listas de jogos',
-  trading: 'Trading em execução',
+  trading: 'Trading em execucao',
   backtest: 'Backtest',
   replay: 'Replay de jogos',
-  reports: 'Relatórios',
-  ranking: 'Ranking de métodos',
-  settings: 'Configurações',
+  reports: 'Relatorios',
+  ranking: 'Ranking de metodos',
   status: 'Status do Sistema',
 };
 
@@ -49,14 +46,13 @@ export default function App() {
   const [bots, setBots] = useState<Bot[]>(() => storage.getBots());
   const [logs, setLogs] = useState<BotLog[]>(() => storage.getLogs());
   const [results, setResults] = useState<BacktestResult[]>(() => storage.getResults());
-  const [settings, setSettings] = useState<AppSettings>(() => storage.getSettings());
+  const [settings] = useState(() => storage.getSettings());
   const [editingBot, setEditingBot] = useState<Bot | undefined>();
   const [botEditorOpen, setBotEditorOpen] = useState(false);
   const [selectedBacktestBot, setSelectedBacktestBot] = useState<Bot | undefined>();
   const [selectedBacktestResult, setSelectedBacktestResult] = useState<BacktestResult | undefined>();
 
   const rankings = useMemo(() => runAllRankings(bots), [bots]);
-  const exportJson = useMemo(() => JSON.stringify(storage.exportAll(), null, 2), [bots, logs, results, settings]);
 
   const navigate = (nextPage: PageKey) => {
     setEditingBot(undefined);
@@ -108,34 +104,6 @@ export default function App() {
     setPage('backtest');
   };
 
-  const saveSettings = (next: AppSettings) => {
-    storage.saveSettings(next);
-    setSettings(next);
-  };
-
-  const importData = (json: string) => {
-    try {
-      storage.importAll(JSON.parse(json));
-      setBots(storage.getBots());
-      setLogs(storage.getLogs());
-      setResults(storage.getResults());
-      setSettings(storage.getSettings());
-    } catch {
-      window.alert('JSON inválido. Confira o conteúdo e tente novamente.');
-    }
-  };
-
-  const clearData = () => {
-    const confirmed = window.confirm('Limpar bots, logs, resultados e configurações locais?');
-    if (!confirmed) return;
-    storage.clearAll();
-    setBots([]);
-    setLogs([]);
-    setResults([]);
-    setSettings(storage.getSettings());
-    setPage('dashboard');
-  };
-
   const content = (() => {
     switch (page) {
       case 'dashboard':
@@ -182,16 +150,6 @@ export default function App() {
         return <Reports results={results} bots={bots} />;
       case 'ranking':
         return <Ranking rankings={rankings} />;
-      case 'settings':
-        return (
-          <SettingsPage
-            settings={settings}
-            exportJson={exportJson}
-            onSave={saveSettings}
-            onImport={importData}
-            onClear={clearData}
-          />
-        );
       case 'status':
         return <SystemStatus bots={bots} logs={logs} results={results} />;
       default:

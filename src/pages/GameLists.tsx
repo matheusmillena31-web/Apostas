@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
-import { Select } from '../components/FormControls';
+import { Input } from '../components/FormControls';
 import { useAsyncData } from '../hooks/useAsyncData';
 import { apiFootballService } from '../services/apiFootball';
 
@@ -14,6 +14,7 @@ const getCurrentSeason = (seasons: { year: number; current: boolean }[]) =>
 
 export function GameLists() {
   const [selectedLeagueId, setSelectedLeagueId] = useState<number | undefined>();
+  const [leagueSearch, setLeagueSearch] = useState('');
   const leaguesState = useAsyncData(() => apiFootballService.buscarLigasAtuais(), []);
   const leagues = leaguesState.data ?? [];
   const activeLeagueId = selectedLeagueId ?? leagues[0]?.league.id;
@@ -22,6 +23,18 @@ export function GameLists() {
     [activeLeagueId, leagues],
   );
   const activeSeason = selectedLeague ? getCurrentSeason(selectedLeague.seasons) : undefined;
+  const filteredLeagues = useMemo(() => {
+    const query = leagueSearch.trim().toLowerCase();
+    const orderedLeagues = [...leagues].sort((a, b) => a.league.name.localeCompare(b.league.name));
+
+    if (!query) return orderedLeagues.slice(0, 12);
+
+    return orderedLeagues
+      .filter((item) =>
+        `${item.league.name} ${item.country.name} ${getCurrentSeason(item.seasons)}`.toLowerCase().includes(query),
+      )
+      .slice(0, 16);
+  }, [leagueSearch, leagues]);
   const matchesState = useAsyncData(
     () => (activeLeagueId && activeSeason ? apiFootballService.buscarFixturesDaLiga(activeLeagueId, activeSeason) : Promise.resolve([])),
     [activeLeagueId, activeSeason],
@@ -40,16 +53,48 @@ export function GameLists() {
         ) : leaguesState.error ? (
           <p className="text-sm text-red-300">{leaguesState.error}</p>
         ) : (
-          <Select
-            value={String(activeLeagueId ?? '')}
-            onChange={(event) => setSelectedLeagueId(Number(event.target.value))}
-          >
-            {leagues.map((item) => (
-              <option key={item.league.id} value={item.league.id}>
-                {item.league.name} - {item.country.name} ({getCurrentSeason(item.seasons)})
-              </option>
-            ))}
-          </Select>
+          <div className="space-y-3">
+            <Input
+              value={leagueSearch}
+              onChange={(event) => setLeagueSearch(event.target.value)}
+              placeholder="Pesquisar liga, pais ou temporada"
+            />
+            {selectedLeague && (
+              <div className="rounded-md border border-electric-500/25 bg-electric-500/10 p-3 text-sm">
+                <p className="font-semibold text-white">{selectedLeague.league.name}</p>
+                <p className="text-slate-400">{selectedLeague.country.name} | Temporada {activeSeason ?? '-'}</p>
+              </div>
+            )}
+            <div className="max-h-80 overflow-y-auto rounded-md border border-white/10 bg-ink-950">
+              {filteredLeagues.map((item) => {
+                const currentSeason = getCurrentSeason(item.seasons);
+                const isSelected = item.league.id === activeLeagueId;
+
+                return (
+                  <button
+                    key={item.league.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedLeagueId(item.league.id);
+                      setLeagueSearch(`${item.league.name} - ${item.country.name}`);
+                    }}
+                    className={`flex w-full items-center gap-3 border-b border-white/8 px-3 py-3 text-left text-sm transition last:border-b-0 ${
+                      isSelected ? 'bg-electric-500/12 text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <img src={item.league.logo} alt="" className="h-8 w-8 shrink-0 rounded bg-white/5 object-contain p-1" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">{item.league.name}</span>
+                      <span className="block text-xs text-slate-500">{item.country.name} | {item.league.type} | {currentSeason}</span>
+                    </span>
+                  </button>
+                );
+              })}
+              {filteredLeagues.length === 0 && (
+                <p className="px-3 py-4 text-sm text-slate-500">Nenhuma liga encontrada.</p>
+              )}
+            </div>
+          </div>
         )}
       </Card>
 

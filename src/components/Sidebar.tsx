@@ -8,7 +8,6 @@ import {
   List,
   PlayCircle,
   Radio,
-  Settings,
   Trophy,
 } from 'lucide-react';
 import type { PageKey } from '../App';
@@ -28,7 +27,6 @@ const items: Array<{ key: PageKey; label: string; icon: React.ElementType }> = [
   { key: 'replay', label: 'Replay de jogos', icon: PlayCircle },
   { key: 'reports', label: 'Relatorios', icon: LineChart },
   { key: 'ranking', label: 'Ranking de metodos', icon: Trophy },
-  { key: 'settings', label: 'Configuracoes', icon: Settings },
   { key: 'status', label: 'Status do Sistema', icon: Activity },
 ];
 

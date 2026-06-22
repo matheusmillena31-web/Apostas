@@ -230,3 +230,45 @@ export interface ApiFootballLiveOddsItem {
   odds?: ApiFootballOddsBet[];
   bookmakers?: ApiFootballBookmaker[];
 }
+
+export interface ApiFootballReplayGameSummary {
+  fixtureId: number;
+  league: ApiFootballFixtureItem['league'] | null;
+  homeTeam: ApiFootballTeam | null;
+  awayTeam: ApiFootballTeam | null;
+  score: ApiFootballFixtureItem['goals'];
+  status: ApiFootballFixtureStatus | null;
+  firstCapturedAt: string;
+  lastCapturedAt: string;
+  snapshotCount: number;
+  minuteFrom: number;
+  minuteTo: number;
+}
+
+export interface ApiFootballReplaySnapshot {
+  capturedAt: string;
+  fixtureId: number;
+  minute: number;
+  extra: number | null;
+  status: ApiFootballFixtureStatus | null;
+  score: ApiFootballFixtureItem['goals'];
+  fixture: ApiFootballFixtureItem;
+  statistics: ApiFootballFixtureStatisticsItem[];
+  events: ApiFootballFixtureEvent[];
+  odds: ApiFootballLiveOddsItem[];
+}
+
+export interface ApiFootballReplayGame {
+  summary: ApiFootballReplayGameSummary;
+  timeline: ApiFootballReplaySnapshot[];
+}
+
+export interface ApiFootballReplayGamesResponse {
+  ok: boolean;
+  games: ApiFootballReplayGameSummary[];
+}
+
+export interface ApiFootballReplayGameResponse {
+  ok: boolean;
+  game: ApiFootballReplayGame;
+}

@@ -8,6 +8,10 @@ import {
   ApiFootballLiveOddsItem,
   ApiFootballOddsItem,
   ApiFootballProxyStatus,
+  ApiFootballReplayGame,
+  ApiFootballReplayGameSummary,
+  ApiFootballReplayGameResponse,
+  ApiFootballReplayGamesResponse,
   ApiFootballStandingsLeague,
 } from '../types/api';
 
@@ -20,6 +24,8 @@ const endpoints = {
   standings: '/standings',
   odds: '/odds',
   liveOdds: '/odds/live',
+  replayGames: '/replay/games',
+  replayGame: (fixtureId: number) => `/replay/games/${fixtureId}`,
 };
 
 const unwrap = <TResponse>(envelope: ApiFootballEnvelope<TResponse>) => envelope.response;
@@ -84,6 +90,16 @@ export class ApiFootballService {
     });
     return unwrap(envelope);
   }
+
+  static async buscarReplayGames(): Promise<ApiFootballReplayGameSummary[]> {
+    const response = await apiClient<ApiFootballReplayGamesResponse>(endpoints.replayGames);
+    return response.games;
+  }
+
+  static async buscarReplayGame(fixtureId: number): Promise<ApiFootballReplayGame> {
+    const response = await apiClient<ApiFootballReplayGameResponse>(endpoints.replayGame(fixtureId));
+    return response.game;
+  }
 }
 
 export const apiFootballService = {
@@ -96,4 +112,6 @@ export const apiFootballService = {
   buscarEventosFixture: ApiFootballService.buscarEventosFixture,
   buscarOddsFixture: ApiFootballService.buscarOddsFixture,
   buscarOddsAoVivo: ApiFootballService.buscarOddsAoVivo,
+  buscarReplayGames: ApiFootballService.buscarReplayGames,
+  buscarReplayGame: ApiFootballService.buscarReplayGame,
 };

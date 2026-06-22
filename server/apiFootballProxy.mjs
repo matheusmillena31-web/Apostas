@@ -148,6 +148,215 @@ const getSnapshotCount = async () => {
   return content.trim() ? content.trim().split(/\r?\n/).length : 0;
 };
 
+const readRawSnapshots = async () => {
+  if (!existsSync(snapshotPath)) return [];
+
+  const content = await readFile(snapshotPath, 'utf8');
+  return content
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return undefined;
+      }
+    })
+    .filter(Boolean);
+};
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const getSnapshotFixtureId = (snapshot) => {
+  const queryFixture = Number(snapshot?.query?.fixture);
+  if (Number.isFinite(queryFixture) && queryFixture > 0) return queryFixture;
+
+  const firstFixture = snapshot?.payload?.response?.[0]?.fixture?.id;
+  return Number.isFinite(firstFixture) ? firstFixture : undefined;
+};
+
+const findNearestPayload = (records, capturedAt) => {
+  if (!records.length) return [];
+
+  const target = new Date(capturedAt).getTime();
+  const afterWindowMs = collectorIntervalMs;
+  const after = records
+    .filter((record) => {
+      const time = new Date(record.capturedAt).getTime();
+      return time >= target && time <= target + afterWindowMs;
+    })
+    .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())[0];
+
+  if (after) return asArray(after.payload?.response);
+
+  const before = records
+    .filter((record) => new Date(record.capturedAt).getTime() <= target)
+    .sort((a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime())[0];
+
+  return asArray(before?.payload?.response);
+};
+
+const getEventAbsoluteMinute = (event) => Number(event?.time?.elapsed ?? 0) + Number(event?.time?.extra ?? 0);
+
+const getSnapshotAbsoluteMinute = (fixture) =>
+  Number(fixture?.fixture?.status?.elapsed ?? 0) + Number(fixture?.fixture?.status?.extra ?? 0);
+
+const isEventInSnapshot = (event, fixture) => getEventAbsoluteMinute(event) <= getSnapshotAbsoluteMinute(fixture);
+
+const eventMatches = (event, type, detailIncludes) => {
+  const eventType = String(event?.type ?? '').toLowerCase();
+  const detail = String(event?.detail ?? '').toLowerCase();
+  return eventType === type.toLowerCase() && (!detailIncludes || detail.includes(detailIncludes.toLowerCase()));
+};
+
+const countTeamEvents = (events, teamId, type, detailIncludes) =>
+  events.filter((event) => event?.team?.id === teamId && eventMatches(event, type, detailIncludes)).length;
+
+const mergeFixtureEvents = (fixture, eventPayload) => {
+  const merged = new Map();
+
+  [...asArray(fixture?.events), ...asArray(eventPayload)].forEach((event) => {
+    const key = [
+      event?.time?.elapsed ?? '',
+      event?.time?.extra ?? '',
+      event?.team?.id ?? '',
+      event?.type ?? '',
+      event?.detail ?? '',
+      event?.player?.id ?? event?.player?.name ?? '',
+    ].join('|');
+    merged.set(key, event);
+  });
+
+  return [...merged.values()]
+    .filter((event) => isEventInSnapshot(event, fixture))
+    .sort((a, b) => getEventAbsoluteMinute(a) - getEventAbsoluteMinute(b));
+};
+
+const buildDerivedStatistics = (fixture, events) => {
+  const teams = [fixture?.teams?.home, fixture?.teams?.away].filter(Boolean);
+
+  return teams.map((team) => {
+    const goalsFromScore = team.id === fixture?.teams?.home?.id ? fixture?.goals?.home : fixture?.goals?.away;
+    const goalsFromEvents = countTeamEvents(events, team.id, 'Goal');
+
+    return {
+      team,
+      statistics: [
+        { type: 'Gols', value: typeof goalsFromScore === 'number' ? goalsFromScore : goalsFromEvents },
+        { type: 'Cartoes Amarelos', value: countTeamEvents(events, team.id, 'Card', 'Yellow') },
+        { type: 'Cartoes Vermelhos', value: countTeamEvents(events, team.id, 'Card', 'Red') },
+        { type: 'Substituicoes', value: countTeamEvents(events, team.id, 'subst') },
+      ],
+    };
+  });
+};
+
+const mergeStatistics = (apiStatistics, derivedStatistics) => {
+  if (!apiStatistics.length) return derivedStatistics;
+
+  return apiStatistics.map((apiTeamStats) => {
+    const derived = derivedStatistics.find((item) => item.team?.id === apiTeamStats.team?.id);
+    const apiStats = asArray(apiTeamStats.statistics);
+    const existingTypes = new Set(apiStats.map((stat) => String(stat.type).toLowerCase()));
+    const missingDerivedStats = asArray(derived?.statistics).filter((stat) => !existingTypes.has(String(stat.type).toLowerCase()));
+
+    return {
+      ...apiTeamStats,
+      statistics: [...apiStats, ...missingDerivedStats],
+    };
+  });
+};
+
+const buildReplayGroups = async () => {
+  const snapshots = await readRawSnapshots();
+  const groups = new Map();
+
+  const ensureGroup = (fixtureId) => {
+    if (!groups.has(fixtureId)) {
+      groups.set(fixtureId, {
+        fixtureId,
+        fixtureSnapshots: [],
+        statisticsSnapshots: [],
+        eventSnapshots: [],
+        oddsSnapshots: [],
+      });
+    }
+    return groups.get(fixtureId);
+  };
+
+  snapshots.forEach((snapshot) => {
+    if (snapshot.kind === 'fixtures-live') {
+      asArray(snapshot.payload?.response).forEach((fixture) => {
+        const fixtureId = fixture?.fixture?.id;
+        if (!fixtureId) return;
+        ensureGroup(fixtureId).fixtureSnapshots.push({
+          capturedAt: snapshot.capturedAt,
+          fixture,
+        });
+      });
+      return;
+    }
+
+    const fixtureId = getSnapshotFixtureId(snapshot);
+    if (!fixtureId) return;
+
+    const group = ensureGroup(fixtureId);
+    if (snapshot.kind === 'fixture-statistics') group.statisticsSnapshots.push(snapshot);
+    if (snapshot.kind === 'fixture-events') group.eventSnapshots.push(snapshot);
+    if (snapshot.kind === 'odds-live') group.oddsSnapshots.push(snapshot);
+  });
+
+  return [...groups.values()].filter((group) => group.fixtureSnapshots.length > 0);
+};
+
+const buildReplayGame = (group) => {
+  const fixtureSnapshots = group.fixtureSnapshots.sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime());
+  const first = fixtureSnapshots[0]?.fixture;
+  const last = fixtureSnapshots[fixtureSnapshots.length - 1]?.fixture;
+
+  const timeline = fixtureSnapshots.map((item) => {
+    const apiStatistics = findNearestPayload(group.statisticsSnapshots, item.capturedAt);
+    const events = mergeFixtureEvents(item.fixture, findNearestPayload(group.eventSnapshots, item.capturedAt));
+    const derivedStatistics = buildDerivedStatistics(item.fixture, events);
+
+    return {
+      capturedAt: item.capturedAt,
+      fixtureId: group.fixtureId,
+      minute: item.fixture?.fixture?.status?.elapsed ?? 0,
+      extra: item.fixture?.fixture?.status?.extra ?? null,
+      status: item.fixture?.fixture?.status ?? null,
+      score: item.fixture?.goals ?? { home: null, away: null },
+      fixture: item.fixture,
+      statistics: mergeStatistics(apiStatistics, derivedStatistics),
+      events,
+      odds: findNearestPayload(group.oddsSnapshots, item.capturedAt),
+    };
+  });
+
+  const summary = {
+    fixtureId: group.fixtureId,
+    league: first?.league ?? last?.league ?? null,
+    homeTeam: first?.teams?.home ?? last?.teams?.home ?? null,
+    awayTeam: first?.teams?.away ?? last?.teams?.away ?? null,
+    score: last?.goals ?? { home: null, away: null },
+    status: last?.fixture?.status ?? null,
+    firstCapturedAt: fixtureSnapshots[0]?.capturedAt,
+    lastCapturedAt: fixtureSnapshots[fixtureSnapshots.length - 1]?.capturedAt,
+    snapshotCount: timeline.length,
+    minuteFrom: timeline[0]?.minute ?? 0,
+    minuteTo: timeline[timeline.length - 1]?.minute ?? 0,
+  };
+
+  return { summary, timeline };
+};
+
+const getReplayGames = async () => {
+  const groups = await buildReplayGroups();
+  return groups
+    .map(buildReplayGame)
+    .sort((a, b) => new Date(b.summary.lastCapturedAt).getTime() - new Date(a.summary.lastCapturedAt).getTime());
+};
+
 const buildTargetUrl = (requestUrl) => {
   const incomingUrl = new URL(requestUrl, `http://localhost:${port}`);
   const apiPath = incomingUrl.pathname.replace(/^\/api\/football/, '') || '/';
@@ -416,6 +625,36 @@ const server = createServer(async (request, response) => {
     sendJson(response, result.ok ? 200 : 502, {
       ...result,
       snapshotCount: await getSnapshotCount(),
+    });
+    return;
+  }
+
+  if (incomingUrl.pathname === '/api/football/replay/games') {
+    const games = await getReplayGames();
+    sendJson(response, 200, {
+      ok: true,
+      games: games.map((game) => game.summary),
+    });
+    return;
+  }
+
+  const replayGameMatch = incomingUrl.pathname.match(/^\/api\/football\/replay\/games\/(\d+)$/);
+  if (replayGameMatch) {
+    const fixtureId = Number(replayGameMatch[1]);
+    const games = await getReplayGames();
+    const game = games.find((item) => item.summary.fixtureId === fixtureId);
+
+    if (!game) {
+      sendJson(response, 404, {
+        ok: false,
+        message: 'Partida nao encontrada na base historica.',
+      });
+      return;
+    }
+
+    sendJson(response, 200, {
+      ok: true,
+      game,
     });
     return;
   }
