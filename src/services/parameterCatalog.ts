@@ -155,6 +155,124 @@ export const liveParameters: ParameterOption[] = [
   ...rhythmOptions,
 ];
 
+const cashOutReferences = [
+  ['total', 'Total'],
+  ['home', 'Mandante'],
+  ['away', 'Visitante'],
+  ['favorite', 'Favorito'],
+  ['underdog', 'Zebra'],
+] as const;
+
+const cashOutRelativeMetrics = [
+  ['goals', 'Gols', 0, 10, 0, 2],
+  ['shots', 'Finalizacoes', 0, 50, 0, 10],
+  ['shotsOnTarget', 'Finalizacoes no alvo', 0, 25, 0, 5],
+  ['corners', 'Escanteios', 0, 20, 0, 5],
+  ['cards', 'Cartoes', 0, 10, 0, 3],
+  ['dangerousAttacks', 'Ataques perigosos', 0, 100, 0, 25],
+] as const;
+
+const cashOutWindowMetrics = cashOutRelativeMetrics.filter(([metric]) => metric !== 'goals');
+
+const cashOutOption = (
+  value: string,
+  label: string,
+  category: string,
+  min = 0,
+  max = 100,
+  step = 1,
+  defaultFrom: number | string = 0,
+  defaultTo: number | string = max,
+): ParameterOption => ({
+  value,
+  label,
+  category,
+  min,
+  max,
+  step,
+  defaultFrom,
+  defaultTo,
+});
+
+const cashOutCurrentOptions: ParameterOption[] = [
+  cashOutOption('cashout.current.odd', 'Odd atual do mercado', 'Regras atuais', 1.01, 50, 0.01, 1.01, 2),
+  cashOutOption('cashout.current.minute', 'Tempo atual', 'Regras atuais', 0, 150, 1, 0, 90),
+  { value: 'cashout.current.score', label: 'Placar atual', category: 'Regras atuais', valueType: 'text', defaultFrom: '0-0' },
+  cashOutOption('cashout.current.goals', 'Gols atuais - total', 'Regras atuais', 0, 15, 1, 0, 5),
+  ...liveParameters
+    .filter((option) => !option.value.startsWith('odds:') && !['liveOdds', 'minute', 'score', 'goals'].includes(option.value))
+    .map((option) => ({ ...option, value: `cashout.current.${option.value}`, category: 'Regras atuais' })),
+];
+
+const cashOutSinceEntryOptions: ParameterOption[] = [
+  cashOutOption('cashout.entry.minutesSinceEntry', 'Minutos desde a entrada', 'Regras desde a entrada', 0, 150, 1, 1, 30),
+  cashOutOption('cashout.entry.odd', 'Odd de entrada', 'Regras desde a entrada', 1.01, 50, 0.01, 1.5, 5),
+  cashOutOption('cashout.entry.oddDiff', 'Diferenca entre odd atual e odd de entrada', 'Regras desde a entrada', -50, 50, 0.01, -1, 1),
+  cashOutOption('cashout.entry.oddPercent', 'Variacao percentual da odd desde a entrada', 'Regras desde a entrada', -100, 500, 0.1, -30, 30),
+  cashOutOption('cashout.entry.oddDrop', 'Queda da odd desde a entrada', 'Regras desde a entrada', 0, 50, 0.01, 0.1, 2),
+  cashOutOption('cashout.entry.oddRise', 'Subida da odd desde a entrada', 'Regras desde a entrada', 0, 50, 0.01, 0.1, 2),
+  ...cashOutRelativeMetrics.flatMap(([metric, label, min, max, defaultFrom, defaultTo]) =>
+    cashOutReferences.map(([reference, referenceLabel]) =>
+      cashOutOption(`cashout.sinceEntry.${metric}.${reference}`, `${label} desde a entrada - ${referenceLabel}`, 'Regras desde a entrada', min, max, 1, defaultFrom, defaultTo),
+    ),
+  ),
+];
+
+const cashOutWindowOptions: ParameterOption[] = windows.flatMap((window) =>
+  cashOutWindowMetrics.flatMap(([metric, label, min, max, defaultFrom, defaultTo]) =>
+    cashOutReferences.map(([reference, referenceLabel]) =>
+      cashOutOption(
+        `cashout.window${window}.${metric}.${reference}`,
+        `${label} ultimos ${window}' desde a entrada - ${referenceLabel}`,
+        `Ultimos ${window}' desde a entrada`,
+        min,
+        max,
+        1,
+        defaultFrom,
+        defaultTo,
+      ),
+    ),
+  ),
+);
+
+const cashOutSituationOptions: ParameterOption[] = [
+  cashOutOption('cashout.situation.gameDraw', 'Jogo empatado', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.favoriteWinning', 'Favorito vencendo', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.favoriteDrawing', 'Favorito empatando', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.favoriteLosing', 'Favorito perdendo', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.underdogWinning', 'Zebra vencendo', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.underdogDrawing', 'Zebra empatando', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.underdogLosing', 'Zebra perdendo', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.homeWinning', 'Mandante vencendo', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.homeDrawing', 'Mandante empatando', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.homeLosing', 'Mandante perdendo', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.awayWinning', 'Visitante vencendo', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.awayDrawing', 'Visitante empatando', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.awayLosing', 'Visitante perdendo', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.favoriteComebackSinceEntry', 'Favorito virou o jogo desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.underdogComebackSinceEntry', 'Zebra virou o jogo desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.homeComebackSinceEntry', 'Mandante virou o jogo desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.awayComebackSinceEntry', 'Visitante virou o jogo desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.favoriteConcededSinceEntry', 'Favorito sofreu gol desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.underdogConcededSinceEntry', 'Zebra sofreu gol desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.homeConcededSinceEntry', 'Mandante sofreu gol desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.awayConcededSinceEntry', 'Visitante sofreu gol desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.scoreChangedSinceEntry', 'Placar mudou desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.scoreUnchangedSinceEntry', 'Placar nao mudou desde a entrada', 'Situacao de jogo para cashout', 1, 1, 1, 1, 1),
+  cashOutOption('cashout.situation.currentGoalDiff', 'Diferenca de gols atual', 'Situacao de jogo para cashout', -10, 10, 1, 0, 3),
+  cashOutOption('cashout.situation.favoriteGoalDiff', 'Diferenca de gols do favorito', 'Situacao de jogo para cashout', -10, 10, 1, 0, 3),
+  cashOutOption('cashout.situation.underdogGoalDiff', 'Diferenca de gols da zebra', 'Situacao de jogo para cashout', -10, 10, 1, 0, 3),
+  cashOutOption('cashout.situation.homeGoalDiff', 'Diferenca de gols do mandante', 'Situacao de jogo para cashout', -10, 10, 1, 0, 3),
+  cashOutOption('cashout.situation.awayGoalDiff', 'Diferenca de gols do visitante', 'Situacao de jogo para cashout', -10, 10, 1, 0, 3),
+];
+
+export const cashOutParameters: ParameterOption[] = [
+  ...cashOutCurrentOptions,
+  ...cashOutSinceEntryOptions,
+  ...cashOutWindowOptions,
+  ...cashOutSituationOptions,
+];
+
 const preLiveReferences = [
   ['home', 'mandante'],
   ['away', 'visitante'],

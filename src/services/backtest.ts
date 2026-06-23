@@ -471,6 +471,10 @@ export const shouldEnter = (bot: Bot, game: Game, snapshot: GameSnapshot, snapsh
     return { passed: false, odd, reason: 'Liga excluída pelo filtro' };
   }
 
+  if (isMarketSettledAtSnapshot(bot, snapshot)) {
+    return { passed: false, odd, reason: 'Mercado ja liquidado neste snapshot' };
+  }
+
   const entryOddFilter = passesOddFilter(bot, odd);
   if (!entryOddFilter.passed) return { passed: false, odd, reason: entryOddFilter.reason };
 
@@ -481,7 +485,214 @@ export const shouldEnter = (bot: Bot, game: Game, snapshot: GameSnapshot, snapsh
   return { passed: rules.passed, odd, reason: rules.reason };
 };
 
-const getCashOut = (bot: Bot, game: Game, entrySnapshot: GameSnapshot, entryOdd: number) => {
+type CashOutRuleEvaluation = {
+  rule: BotRule;
+  value: unknown;
+  passed: boolean;
+};
+
+type CashOutEvaluation = {
+  passed: boolean;
+  reason: string;
+  matchedRules: string[];
+  failedRules: string[];
+  evaluations: CashOutRuleEvaluation[];
+};
+
+type CashOutMatch = {
+  snapshot: GameSnapshot;
+  odd: number;
+  evaluation: CashOutEvaluation;
+};
+
+const ruleDescription = (rule: BotRule) => {
+  const value = rule.operator === 'between' ? `${rule.value} e ${rule.secondValue}` : rule.value;
+  return `${rule.parameter} ${rule.operator === 'between' ? 'entre' : rule.operator} ${value}`;
+};
+
+const getTotalMetricDelta = (current: GameSnapshot, baseline: GameSnapshot, metric: string) => {
+  if (metric === 'goals') return current.scoreHome + current.scoreAway - baseline.scoreHome - baseline.scoreAway;
+  const currentValue = getTotalMetric(current, metric);
+  const baselineValue = getTotalMetric(baseline, metric);
+  if (typeof currentValue !== 'number' || typeof baselineValue !== 'number') return undefined;
+  return Math.max(0, currentValue - baselineValue);
+};
+
+const getReferenceGoals = (snapshot: GameSnapshot, game: Game, reference: string) => {
+  if (reference === 'total') return snapshot.scoreHome + snapshot.scoreAway;
+  const resolved = resolveReference(reference, game);
+  if (resolved === 'home') return snapshot.scoreHome;
+  if (resolved === 'away') return snapshot.scoreAway;
+  return undefined;
+};
+
+const getReferenceMetricDelta = (current: GameSnapshot, baseline: GameSnapshot, game: Game, metric: string, reference: string) => {
+  if (reference === 'total') return getTotalMetricDelta(current, baseline, metric);
+
+  if (metric === 'goals') {
+    const currentValue = getReferenceGoals(current, game, reference);
+    const baselineValue = getReferenceGoals(baseline, game, reference);
+    if (currentValue === undefined || baselineValue === undefined) return undefined;
+    return Math.max(0, currentValue - baselineValue);
+  }
+
+  const currentValue = getTeamStatValue(current, game, metric, reference);
+  const baselineValue = getTeamStatValue(baseline, game, metric, reference);
+  if (currentValue === undefined || baselineValue === undefined) return undefined;
+  return Math.max(0, currentValue - baselineValue);
+};
+
+const getWindowBaselineSnapshot = (game: Game, entryIndex: number, currentIndex: number, startMinute: number) => {
+  const candidates = game.snapshots
+    .slice(entryIndex, currentIndex + 1)
+    .filter((snapshot) => snapshot.minute <= startMinute)
+    .sort((a, b) => b.minute - a.minute);
+  return candidates[0] ?? game.snapshots[entryIndex];
+};
+
+const hasReferenceComebackSinceEntry = (entrySnapshot: GameSnapshot, currentSnapshot: GameSnapshot, game: Game, reference: TeamReference) => {
+  const entryDiff = getReferenceGoalDiff(entrySnapshot, game, reference);
+  const currentDiff = getReferenceGoalDiff(currentSnapshot, game, reference);
+  if (entryDiff === undefined || currentDiff === undefined) return undefined;
+  return entryDiff < 0 && currentDiff > 0 ? 1 : 0;
+};
+
+const hasReferenceConcededSinceEntry = (entrySnapshot: GameSnapshot, currentSnapshot: GameSnapshot, game: Game, reference: TeamReference) => {
+  const entryOpponent = getOpponentScoreForReference(entrySnapshot, game, reference);
+  const currentOpponent = getOpponentScoreForReference(currentSnapshot, game, reference);
+  if (entryOpponent === undefined || currentOpponent === undefined) return undefined;
+  return currentOpponent > entryOpponent ? 1 : 0;
+};
+
+const getCashOutRuleValue = (
+  rule: BotRule,
+  bot: Bot,
+  game: Game,
+  entrySnapshot: GameSnapshot,
+  currentSnapshot: GameSnapshot,
+  entryOdd: number,
+  currentOdd: number,
+  entryIndex: number,
+  currentIndex: number,
+) => {
+  if (rule.parameter.startsWith('cashout.current.')) {
+    const currentParameter = rule.parameter.replace('cashout.current.', '');
+    if (currentParameter === 'odd') return currentOdd;
+    return getRuleValue({ ...rule, mode: 'live', parameter: currentParameter }, bot, game, currentSnapshot, currentOdd, currentIndex);
+  }
+
+  if (rule.parameter === 'cashout.entry.minutesSinceEntry') return Math.max(0, currentSnapshot.minute - entrySnapshot.minute);
+  if (rule.parameter === 'cashout.entry.odd') return entryOdd;
+  if (rule.parameter === 'cashout.entry.oddDiff') return currentOdd - entryOdd;
+  if (rule.parameter === 'cashout.entry.oddPercent') return ((currentOdd - entryOdd) / entryOdd) * 100;
+  if (rule.parameter === 'cashout.entry.oddDrop') return Math.max(0, entryOdd - currentOdd);
+  if (rule.parameter === 'cashout.entry.oddRise') return Math.max(0, currentOdd - entryOdd);
+
+  const sinceEntryMatch = rule.parameter.match(/^cashout\.sinceEntry\.([^\\.]+)\.([^\\.]+)$/);
+  if (sinceEntryMatch) return getReferenceMetricDelta(currentSnapshot, entrySnapshot, game, sinceEntryMatch[1], sinceEntryMatch[2]);
+
+  const windowMatch = rule.parameter.match(/^cashout\.window(\d+)\.([^\\.]+)\.([^\\.]+)$/);
+  if (windowMatch) {
+    const window = Number(windowMatch[1]);
+    const baseline = getWindowBaselineSnapshot(game, entryIndex, currentIndex, Math.max(entrySnapshot.minute, currentSnapshot.minute - window));
+    return getReferenceMetricDelta(currentSnapshot, baseline, game, windowMatch[2], windowMatch[3]);
+  }
+
+  if (rule.parameter.startsWith('cashout.situation.')) {
+    const situation = rule.parameter.replace('cashout.situation.', '');
+    const currentGoalDiff = currentSnapshot.scoreHome - currentSnapshot.scoreAway;
+    const scoreChanged = currentSnapshot.scoreHome !== entrySnapshot.scoreHome || currentSnapshot.scoreAway !== entrySnapshot.scoreAway;
+
+    const values: Record<string, unknown> = {
+      gameDraw: currentSnapshot.scoreHome === currentSnapshot.scoreAway ? 1 : 0,
+      favoriteWinning: getReferenceState(currentSnapshot, game, 'favorite', 'Winning'),
+      favoriteDrawing: getReferenceState(currentSnapshot, game, 'favorite', 'Drawing'),
+      favoriteLosing: getReferenceState(currentSnapshot, game, 'favorite', 'Losing'),
+      underdogWinning: getReferenceState(currentSnapshot, game, 'underdog', 'Winning'),
+      underdogDrawing: getReferenceState(currentSnapshot, game, 'underdog', 'Drawing'),
+      underdogLosing: getReferenceState(currentSnapshot, game, 'underdog', 'Losing'),
+      homeWinning: getReferenceState(currentSnapshot, game, 'home', 'Winning'),
+      homeDrawing: getReferenceState(currentSnapshot, game, 'home', 'Drawing'),
+      homeLosing: getReferenceState(currentSnapshot, game, 'home', 'Losing'),
+      awayWinning: getReferenceState(currentSnapshot, game, 'away', 'Winning'),
+      awayDrawing: getReferenceState(currentSnapshot, game, 'away', 'Drawing'),
+      awayLosing: getReferenceState(currentSnapshot, game, 'away', 'Losing'),
+      favoriteComebackSinceEntry: hasReferenceComebackSinceEntry(entrySnapshot, currentSnapshot, game, 'favorite'),
+      underdogComebackSinceEntry: hasReferenceComebackSinceEntry(entrySnapshot, currentSnapshot, game, 'underdog'),
+      homeComebackSinceEntry: hasReferenceComebackSinceEntry(entrySnapshot, currentSnapshot, game, 'home'),
+      awayComebackSinceEntry: hasReferenceComebackSinceEntry(entrySnapshot, currentSnapshot, game, 'away'),
+      favoriteConcededSinceEntry: hasReferenceConcededSinceEntry(entrySnapshot, currentSnapshot, game, 'favorite'),
+      underdogConcededSinceEntry: hasReferenceConcededSinceEntry(entrySnapshot, currentSnapshot, game, 'underdog'),
+      homeConcededSinceEntry: hasReferenceConcededSinceEntry(entrySnapshot, currentSnapshot, game, 'home'),
+      awayConcededSinceEntry: hasReferenceConcededSinceEntry(entrySnapshot, currentSnapshot, game, 'away'),
+      scoreChangedSinceEntry: scoreChanged ? 1 : 0,
+      scoreUnchangedSinceEntry: scoreChanged ? 0 : 1,
+      currentGoalDiff,
+      favoriteGoalDiff: getReferenceGoalDiff(currentSnapshot, game, 'favorite'),
+      underdogGoalDiff: getReferenceGoalDiff(currentSnapshot, game, 'underdog'),
+      homeGoalDiff: getReferenceGoalDiff(currentSnapshot, game, 'home'),
+      awayGoalDiff: getReferenceGoalDiff(currentSnapshot, game, 'away'),
+    };
+
+    return values[situation];
+  }
+
+  return getRuleValue(rule, bot, game, currentSnapshot, currentOdd, currentIndex);
+};
+
+const evaluateCashOutRules = (
+  rules: BotRule[],
+  bot: Bot,
+  game: Game,
+  entrySnapshot: GameSnapshot,
+  currentSnapshot: GameSnapshot,
+  entryOdd: number,
+  currentOdd: number,
+  entryIndex: number,
+  currentIndex: number,
+  exitLogic?: 'AND' | 'OR',
+): CashOutEvaluation => {
+  const evaluations = rules.map((rule) => {
+    const value = getCashOutRuleValue(rule, bot, game, entrySnapshot, currentSnapshot, entryOdd, currentOdd, entryIndex, currentIndex);
+    return {
+      rule,
+      value,
+      passed: compareRule(value, rule),
+    };
+  });
+
+  const passed = evaluations.length === 0
+    ? true
+    : exitLogic === 'OR'
+      ? evaluations.some((item) => item.passed)
+      : exitLogic === 'AND'
+        ? evaluations.every((item) => item.passed)
+        : evaluations.reduce((acc, item, index) => {
+            if (index === 0) return item.rule.connector === 'NOT' ? !item.passed : item.passed;
+            switch (item.rule.connector ?? 'AND') {
+              case 'OR':
+                return acc || item.passed;
+              case 'NOT':
+                return acc && !item.passed;
+              case 'AND':
+              default:
+                return acc && item.passed;
+            }
+          }, true);
+
+  const matchedRules = evaluations.filter((item) => item.passed).map((item) => ruleDescription(item.rule));
+  const failedRules = evaluations.filter((item) => !item.passed).map((item) => ruleDescription(item.rule));
+
+  return {
+    passed,
+    reason: passed ? 'Regras de cashout aprovadas' : 'Regras de cashout reprovadas',
+    matchedRules,
+    failedRules,
+    evaluations,
+  };
+};
+
+const getCashOut = (bot: Bot, game: Game, entrySnapshot: GameSnapshot, entryIndex: number, entryOdd: number): CashOutMatch | undefined => {
   const cashOut = bot.cashOut;
   if (!cashOut?.enabled) return undefined;
   if (isMarketSettledAtSnapshot(bot, entrySnapshot)) return undefined;
@@ -490,22 +701,32 @@ const getCashOut = (bot: Bot, game: Game, entrySnapshot: GameSnapshot, entryOdd:
   const toMinute = cashOut.toMinute ?? 150;
   const exitRules = cashOut.exitRules.filter((rule) => rule.parameter);
 
-  return game.snapshots.find((snapshot, snapshotIndex) => {
-    if (snapshot.minute < fromMinute || snapshot.minute > toMinute || snapshot.minute <= entrySnapshot.minute) return false;
-    if (isMarketSettledAtSnapshot(bot, snapshot)) return false;
-    if (exitRules.length === 0) return true;
+  for (const [snapshotIndex, snapshot] of game.snapshots.entries()) {
+    if (snapshotIndex <= entryIndex) continue;
+    if (snapshot.minute < fromMinute || snapshot.minute > toMinute) continue;
+    if (isMarketSettledAtSnapshot(bot, snapshot)) return undefined;
+
     const currentOdd = getEntryOdd(bot, snapshot, game);
-    return evaluateRuleList(exitRules, bot, game, snapshot, currentOdd, snapshotIndex).passed;
-  });
+    if (!Number.isFinite(currentOdd) || currentOdd <= 1.01) continue;
+
+    const evaluation = evaluateCashOutRules(exitRules, bot, game, entrySnapshot, snapshot, entryOdd, currentOdd, entryIndex, snapshotIndex, cashOut.exitLogic);
+    if (evaluation.passed) return { snapshot, odd: currentOdd, evaluation };
+  }
+
+  return undefined;
+};
+
+export const calculateCashOutProfit = (operation: TradeSide, entryOdd: number, exitOdd: number, stake: number) => {
+  if (!Number.isFinite(entryOdd) || !Number.isFinite(exitOdd) || entryOdd <= 1.01 || exitOdd <= 1.01 || stake <= 0) return undefined;
+  return operation === 'BACK'
+    ? stake * ((entryOdd - exitOdd) / exitOdd)
+    : stake * ((exitOdd - entryOdd) / exitOdd);
 };
 
 const settleCashOut = (bot: Bot, entryOdd: number, exitOdd: number) => {
   const operation: TradeSide = bot.operation ?? 'BACK';
   const stake = 1;
-  const profit =
-    operation === 'BACK'
-      ? stake * ((entryOdd - exitOdd) / exitOdd)
-      : stake * ((exitOdd - entryOdd) / exitOdd);
+  const profit = calculateCashOutProfit(operation, entryOdd, exitOdd, stake) ?? 0;
 
   return {
     result: profit >= 0 ? 'green' : 'red',
@@ -580,9 +801,8 @@ export const runBacktest = (bot: Bot, games: Game[] = []): { result: BacktestRes
       });
 
       if (decision.passed) {
-        const cashOutSnapshot = getCashOut(backtestBot, game, snapshot, decision.odd);
-        const cashOutOdd = cashOutSnapshot ? getEntryOdd(backtestBot, cashOutSnapshot, game) : undefined;
-        const settled = cashOutOdd ? settleCashOut(backtestBot, decision.odd, cashOutOdd) : settleTrade(backtestBot, game, decision.odd);
+        const cashOut = getCashOut(backtestBot, game, snapshot, snapshotIndex, decision.odd);
+        const settled = cashOut ? settleCashOut(backtestBot, decision.odd, cashOut.odd) : settleTrade(backtestBot, game, decision.odd);
         entries.push({
           id: uid('entry'),
           botId: bot.id,
@@ -597,10 +817,21 @@ export const runBacktest = (bot: Bot, games: Game[] = []): { result: BacktestRes
           stake: 1,
           result: settled.result,
           profit: settled.profit,
-          reason: cashOutSnapshot
-            ? `${decision.reason}; cash-out no minuto ${cashOutSnapshot.minute} @ ${cashOutOdd?.toFixed(2)}`
+          reason: cashOut
+            ? `${decision.reason}; cash-out no minuto ${cashOut.snapshot.minute} @ ${cashOut.odd.toFixed(2)}`
             : decision.reason,
           date,
+          cashOutApplied: Boolean(cashOut),
+          cashOutMinute: cashOut?.snapshot.minute,
+          cashOutOdd: cashOut?.odd,
+          cashOutProfit: cashOut ? settled.profit : undefined,
+          cashOutReason: cashOut?.evaluation.reason,
+          cashOutRulesMatched: cashOut?.evaluation.matchedRules,
+          cashOutRulesFailed: cashOut?.evaluation.failedRules,
+          entryScoreHome: snapshot.scoreHome,
+          entryScoreAway: snapshot.scoreAway,
+          exitScoreHome: cashOut?.snapshot.scoreHome,
+          exitScoreAway: cashOut?.snapshot.scoreAway,
         });
         entered = true;
       }

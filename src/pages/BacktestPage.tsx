@@ -389,14 +389,16 @@ export function BacktestPage({ bots, selectedBot, initialResult, historicalGames
 
               <Card title="Entradas simuladas" subtitle={`Pior liga: ${result.worstLeague}`}>
                 <div className="table-scroll">
-                  <table className="min-w-[920px] w-full text-left text-sm">
+                  <table className="min-w-[1120px] w-full text-left text-sm">
                     <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
                       <tr>
                         <th className="px-3 py-3">Jogo</th>
                         <th className="px-3 py-3">Liga</th>
                         <th className="px-3 py-3">Minuto</th>
+                        <th className="px-3 py-3">Saida</th>
                         <th className="px-3 py-3">Mercado</th>
-                        <th className="px-3 py-3">Odd</th>
+                        <th className="px-3 py-3">Odds</th>
+                        <th className="px-3 py-3">Placar</th>
                         <th className="px-3 py-3">Resultado</th>
                         <th className="px-3 py-3">Lucro</th>
                         <th className="px-3 py-3">Motivo</th>
@@ -408,11 +410,33 @@ export function BacktestPage({ bots, selectedBot, initialResult, historicalGames
                           <td className="px-3 py-4 text-white">{entry.game}</td>
                           <td className="px-3 py-4 text-slate-300">{entry.league}</td>
                           <td className="px-3 py-4 text-slate-300">{entry.minute}'</td>
+                          <td className="px-3 py-4 text-slate-300">
+                            {entry.cashOutApplied ? (
+                              <span className="font-semibold text-amber-300">Cashout {entry.cashOutMinute}'</span>
+                            ) : (
+                              <span>Final</span>
+                            )}
+                          </td>
                           <td className="px-3 py-4 text-slate-300">{entry.market} {entry.operation}</td>
-                          <td className="px-3 py-4 text-slate-300">{entry.odd.toFixed(2)}</td>
+                          <td className="px-3 py-4 text-slate-300">
+                            {entry.odd.toFixed(2)}
+                            {entry.cashOutOdd ? <span className="text-amber-300"> -&gt; {entry.cashOutOdd.toFixed(2)}</span> : null}
+                          </td>
+                          <td className="px-3 py-4 text-slate-300">
+                            {entry.entryScoreHome ?? '-'}-{entry.entryScoreAway ?? '-'}
+                            {entry.cashOutApplied ? <span className="text-amber-300"> -&gt; {entry.exitScoreHome ?? '-'}-{entry.exitScoreAway ?? '-'}</span> : null}
+                          </td>
                           <td className={`px-3 py-4 font-semibold ${entry.result === 'green' ? 'text-emerald-300' : 'text-red-300'}`}>{entry.result}</td>
                           <td className={`px-3 py-4 font-semibold ${entry.profit >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{formatCurrency(entry.profit)}</td>
-                          <td className="px-3 py-4 text-slate-400">{entry.reason}</td>
+                          <td className="px-3 py-4 text-slate-400">
+                            <p>{entry.reason}</p>
+                            {entry.cashOutApplied && (
+                              <p className="mt-1 text-xs text-amber-300">
+                                {entry.cashOutReason}
+                                {entry.cashOutRulesMatched?.length ? `: ${entry.cashOutRulesMatched.join('; ')}` : ''}
+                              </p>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

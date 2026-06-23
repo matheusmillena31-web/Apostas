@@ -3,6 +3,7 @@ import { ArrowLeftRight, Plus, Save, X } from 'lucide-react';
 import { Bot, BotMode, BotRule, BotRuleConnector, BotRuleOperator } from '../types';
 import {
   ParameterOption,
+  cashOutParameters,
   getParameterOption,
   getParameterOptions,
   groupParameterOptions,
@@ -145,7 +146,20 @@ const createGameSituationMetricRule = (): BotRule => ({
   connector: 'AND',
 });
 
-const createCashOutRule = (mode: BotMode): BotRule => createRule(mode, mode === 'live' ? 'liveOdds' : 'preLiveOdds');
+const getOptionFromList = (options: ParameterOption[], parameter: string) => options.find((option) => option.value === parameter);
+
+const createCashOutRule = (): BotRule => {
+  const option = getOptionFromList(cashOutParameters, 'cashout.current.odd');
+  return {
+    id: uid('rule'),
+    mode: 'live',
+    parameter: 'cashout.current.odd',
+    operator: '<=',
+    value: option?.defaultFrom ?? 1.5,
+    secondValue: undefined,
+    connector: 'AND',
+  };
+};
 
 export function createDefaultBot(_defaultStake: number): Bot {
   const now = new Date().toISOString();
@@ -170,6 +184,7 @@ export function createDefaultBot(_defaultStake: number): Bot {
       enabled: false,
       fromMinute: undefined,
       toMinute: undefined,
+      exitLogic: 'AND',
       exitRules: [],
     },
     createdAt: now,
@@ -206,6 +221,7 @@ function RangeRuleCard({
   rule,
   mode,
   index,
+  optionsOverride,
   onSwitchMode,
   onRemove,
   onPatch,
@@ -213,12 +229,13 @@ function RangeRuleCard({
   rule: BotRule;
   mode: BotMode;
   index: number;
+  optionsOverride?: ParameterOption[];
   onSwitchMode?: () => void;
   onRemove: () => void;
   onPatch: (patch: Partial<BotRule>) => void;
 }) {
-  const options = getParameterOptions(mode);
-  const selectedOption = getParameterOption(mode, rule.parameter);
+  const options = optionsOverride ?? getParameterOptions(mode);
+  const selectedOption = optionsOverride ? getOptionFromList(optionsOverride, rule.parameter) : getParameterOption(mode, rule.parameter);
   const isText = selectedOption?.valueType === 'text';
   const min = selectedOption?.min ?? 0;
   const max = selectedOption?.max ?? 100;
@@ -229,7 +246,7 @@ function RangeRuleCard({
   const showSecondValue = !isText && rule.operator === 'between';
 
   const updateParameter = (parameter: string) => {
-    const option = getParameterOption(mode, parameter);
+    const option = optionsOverride ? getOptionFromList(optionsOverride, parameter) : getParameterOption(mode, parameter);
     onPatch({
       parameter,
       operator: option?.valueType === 'text' ? '=' : 'between',
@@ -946,7 +963,7 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       cashOut: {
         ...cashOut,
         enabled: true,
-        exitRules: [...(cashOut.exitRules ?? []), createCashOutRule(bot.mode)],
+        exitRules: [...(cashOut.exitRules ?? []), createCashOutRule()],
       },
     });
   };
@@ -985,7 +1002,8 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
         enabled: Boolean(bot.cashOut?.enabled),
         fromMinute: bot.cashOut?.fromMinute,
         toMinute: bot.cashOut?.toMinute,
-        exitRules: bot.cashOut?.exitRules.filter((rule) => rule.parameter) ?? [],
+        exitLogic: bot.cashOut?.exitLogic ?? 'AND',
+        exitRules: bot.cashOut?.exitRules?.filter((rule) => rule.parameter) ?? [],
       },
       updatedAt: now,
       createdAt: bot.createdAt || now,
@@ -1097,27 +1115,27 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       </section>
 
       <section className="space-y-5">
-        <h2 className="text-xl font-semibold text-white">5o passo: cash-out (opcional)</h2>
+        <h2 className="text-xl font-semibold text-white">5o passo: Cashout / Saida da operacao</h2>
         <div className="rounded-lg border border-violet-500/80 bg-ink-850/95 p-5 shadow-glow">
           <label className="flex items-center gap-3 text-sm font-semibold text-slate-300">
             <input
               type="checkbox"
               checked={Boolean(bot.cashOut?.enabled)}
-              onChange={(event) => updateBot({ cashOut: { ...(bot.cashOut ?? { exitRules: [] }), enabled: event.target.checked } })}
+              onChange={(event) => updateBot({ cashOut: { ...(bot.cashOut ?? { exitRules: [], exitLogic: 'AND' }), enabled: event.target.checked } })}
               className="h-4 w-4 accent-violet-600"
             />
-            Ativar cash-out por janela de tempo e parametros de saida
+            Ativar cashout por janela de tempo e parametros de saida
           </label>
 
-          <div className="mt-5 grid items-end gap-5 md:grid-cols-[1fr_auto_1fr]">
+          <div className="mt-5 grid items-end gap-5 md:grid-cols-[1fr_auto_1fr_1fr]">
             <label>
-              <span className="mb-2 block text-sm font-medium text-slate-300">Cash-out de minuto</span>
+              <span className="mb-2 block text-sm font-medium text-slate-300">Procurar cashout de minuto</span>
               <input
                 type="number"
                 min={0}
                 max={150}
                 value={bot.cashOut?.fromMinute ?? ''}
-                onChange={(event) => updateBot({ cashOut: { ...(bot.cashOut ?? { enabled: true, exitRules: [] }), fromMinute: toOptionalNumber(event.target.value) } })}
+                onChange={(event) => updateBot({ cashOut: { ...(bot.cashOut ?? { enabled: true, exitRules: [], exitLogic: 'AND' }), fromMinute: toOptionalNumber(event.target.value) } })}
                 className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500"
               />
             </label>
@@ -1129,19 +1147,49 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
                 min={0}
                 max={150}
                 value={bot.cashOut?.toMinute ?? ''}
-                onChange={(event) => updateBot({ cashOut: { ...(bot.cashOut ?? { enabled: true, exitRules: [] }), toMinute: toOptionalNumber(event.target.value) } })}
+                onChange={(event) => updateBot({ cashOut: { ...(bot.cashOut ?? { enabled: true, exitRules: [], exitLogic: 'AND' }), toMinute: toOptionalNumber(event.target.value) } })}
                 className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500"
               />
+            </label>
+            <label>
+              <span className="mb-2 block text-sm font-medium text-slate-300">Logica das regras</span>
+              <select
+                value={bot.cashOut?.exitLogic ?? 'AND'}
+                onChange={(event) => updateBot({ cashOut: { ...(bot.cashOut ?? { enabled: true, exitRules: [] }), exitLogic: event.target.value as 'AND' | 'OR' } })}
+                className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500"
+              >
+                <option value="AND">AND - todas precisam passar</option>
+                <option value="OR">OR - qualquer uma pode passar</option>
+              </select>
             </label>
           </div>
 
           <div className="mt-5 space-y-5">
+            <div className="grid gap-3 text-sm text-slate-400 md:grid-cols-4">
+              <div className="rounded-md border border-white/8 bg-ink-950/70 p-3">
+                <p className="font-semibold text-slate-200">Regras atuais</p>
+                <p>Odd, tempo, placar e estatisticas do snapshot atual.</p>
+              </div>
+              <div className="rounded-md border border-white/8 bg-ink-950/70 p-3">
+                <p className="font-semibold text-slate-200">Desde a entrada</p>
+                <p>Compara o snapshot atual com o momento em que entrou.</p>
+              </div>
+              <div className="rounded-md border border-white/8 bg-ink-950/70 p-3">
+                <p className="font-semibold text-slate-200">Janelas apos entrada</p>
+                <p>Ultimos 5, 10 ou 15 minutos sem olhar antes da entrada.</p>
+              </div>
+              <div className="rounded-md border border-white/8 bg-ink-950/70 p-3">
+                <p className="font-semibold text-slate-200">Situacao de jogo</p>
+                <p>Favorito, zebra, placar mudou e gols sofridos.</p>
+              </div>
+            </div>
             {(bot.cashOut?.exitRules ?? []).map((rule, index) => (
               <RangeRuleCard
                 key={rule.id}
                 rule={rule}
-                mode={bot.mode}
+                mode="live"
                 index={index}
+                optionsOverride={cashOutParameters}
                 onRemove={() => removeCashOutRule(rule.id)}
                 onPatch={(patch) => patchCashOutRule(rule.id, patch)}
               />

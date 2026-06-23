@@ -187,6 +187,7 @@ export interface BotCashOutConfig {
   enabled: boolean;
   fromMinute?: number;
   toMinute?: number;
+  exitLogic?: 'AND' | 'OR';
   exitRules: BotRule[];
 }
 
@@ -227,6 +228,17 @@ export interface TradeEntry {
   profit: number;
   reason: string;
   date: string;
+  cashOutApplied?: boolean;
+  cashOutMinute?: number;
+  cashOutOdd?: number;
+  cashOutProfit?: number;
+  cashOutReason?: string;
+  cashOutRulesMatched?: string[];
+  cashOutRulesFailed?: string[];
+  entryScoreHome?: number;
+  entryScoreAway?: number;
+  exitScoreHome?: number;
+  exitScoreAway?: number;
 }
 
 export interface BacktestResult {

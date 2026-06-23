@@ -60,7 +60,7 @@ const normalizeBot = (payload: unknown): Bot => {
       rules: item.rules,
       includedLeagues: Array.isArray(item.includedLeagues) ? item.includedLeagues : [],
       excludedLeagues: Array.isArray(item.excludedLeagues) ? item.excludedLeagues : [],
-      cashOut: item.cashOut ?? { enabled: false, exitRules: [] },
+      cashOut: item.cashOut ? { exitLogic: 'AND', ...item.cashOut } : { enabled: false, exitLogic: 'AND', exitRules: [] },
       createdAt: String(item.createdAt ?? now),
       updatedAt: String(item.updatedAt ?? now),
     };
@@ -104,7 +104,7 @@ const normalizeBot = (payload: unknown): Bot => {
     rules: rules.length ? rules : [rule(mode, '', '>=', '')],
     includedLeagues: [],
     excludedLeagues: [],
-    cashOut: { enabled: false, exitRules: [] },
+    cashOut: { enabled: false, exitLogic: 'AND', exitRules: [] },
     createdAt: String(item.createdAt ?? now),
     updatedAt: String(item.updatedAt ?? now),
   };
