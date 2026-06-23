@@ -27,7 +27,7 @@ for (const envFile of envFiles) {
   }
 }
 
-const port = Number(process.env.BACKEND_PORT ?? 3333);
+const port = Number(process.env.PORT ?? process.env.BACKEND_PORT ?? 3333);
 const apiFootballBaseUrl = process.env.API_FOOTBALL_BASE_URL ?? 'https://v3.football.api-sports.io';
 const apiFootballToken = process.env.API_FOOTBALL_TOKEN;
 const allowedOrigin = process.env.BACKEND_ALLOWED_ORIGIN ?? '*';
