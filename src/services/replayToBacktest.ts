@@ -1,4 +1,5 @@
 import { apiFootballService } from './apiFootball';
+import { enrichGamesWithHistoricalPreLiveStats } from './historicalStatsService';
 import { Game, GameSnapshot, LiveStats, TeamLiveStats } from '../types';
 import { ApiFootballOddsBet, ApiFootballReplayGame, ApiFootballReplaySnapshot } from '../types/api';
 
@@ -161,6 +162,8 @@ const getSnapshotOdds = (snapshot: ApiFootballReplaySnapshot, previous?: GameSna
 });
 
 const convertSnapshot = (snapshot: ApiFootballReplaySnapshot, previous?: GameSnapshot): GameSnapshot => ({
+  capturedAt: snapshot.capturedAt,
+  fixtureDate: snapshot.fixture?.fixture?.date,
   minute: snapshot.minute ?? 0,
   scoreHome: snapshot.score?.home ?? 0,
   scoreAway: snapshot.score?.away ?? 0,
@@ -192,6 +195,7 @@ export const convertReplayGameToBacktestGame = (replayGame: ApiFootballReplayGam
     awayTeam: replayGame.summary.awayTeam?.name ?? 'Visitante',
     status: 'historico',
     currentMinute: last.minute,
+    fixtureDate: timeline[0]?.fixture?.fixture?.date ?? replayGame.summary.firstCapturedAt,
     finalScoreHome: replayGame.summary.score?.home ?? last.scoreHome,
     finalScoreAway: replayGame.summary.score?.away ?? last.scoreAway,
     preLive: {
@@ -202,11 +206,10 @@ export const convertReplayGameToBacktestGame = (replayGame: ApiFootballReplayGam
       over25Odd: first.over25Odd,
       under25Odd: first.under25Odd,
       bttsOdd: first.bttsOdd,
-      averageGoals: replayGame.summary.score ? (replayGame.summary.score.home ?? 0) + (replayGame.summary.score.away ?? 0) : 0,
-      averageCorners: first.stats.corners,
-      h2hGoals: 0,
-      tablePositionGap: 0,
-      favoritism: Math.abs(first.homeOdd - first.awayOdd),
+      season: replayGame.summary.league?.season,
+      h2hGoals: undefined,
+      tablePositionGap: undefined,
+      favoritism: undefined,
     },
     snapshots,
   };
@@ -223,5 +226,5 @@ export const loadHistoricalBacktestGames = async (limit = MAX_REPLAY_GAMES): Pro
     if (game) games.push(game);
   }
 
-  return games;
+  return enrichGamesWithHistoricalPreLiveStats(games);
 };

@@ -1,4 +1,5 @@
 import { BacktestResult, Bot, BotLog, BotRule, Game, GameSnapshot, MethodRanking, TeamReference, TradeEntry, TradeSide } from '../types';
+import { resolvePreLiveRuleValue } from './preLiveStatsService';
 import { uid } from '../utils/formatters';
 
 const clampOdd = (odd: number) => Number(Math.max(1.01, Math.min(50, odd)).toFixed(2));
@@ -387,26 +388,7 @@ const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapsho
     return liveValues[rule.parameter];
   }
 
-  const preLiveValues: Record<string, unknown> = {
-    championship: game.league,
-    season: undefined,
-    homeTeam: game.homeTeam,
-    awayTeam: game.awayTeam,
-    tablePosition: game.preLive.tablePositionGap,
-    performance: undefined,
-    averageGoals: game.preLive.averageGoals,
-    averageCorners: game.preLive.averageCorners,
-    averageCards: undefined,
-    winningStreak: undefined,
-    losingStreak: undefined,
-    headToHead: game.preLive.h2hGoals,
-    offensiveStrength: undefined,
-    defensiveStrength: undefined,
-    favoritism: game.preLive.favoritism,
-    preLiveOdds: odd,
-  };
-
-  return preLiveValues[rule.parameter];
+  return resolvePreLiveRuleValue(rule.parameter, bot, game, odd);
 };
 
 const compareRule = (actual: unknown, rule: BotRule) => {

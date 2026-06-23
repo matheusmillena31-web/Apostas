@@ -122,13 +122,13 @@ const rhythmOptions: ParameterOption[] = [
 ];
 
 const oddsOptions: ParameterOption[] = [
-  { value: 'liveOdds', label: 'Odd atual do mercado escolhido', category: 'Odds', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
-  { value: 'odds:initial', label: 'Odd inicial pre-live do mercado escolhido', category: 'Odds', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
-  { value: 'odds:diff', label: 'Diferenca entre odd atual e inicial', category: 'Odds', min: -50, max: 50, step: 0.01, defaultFrom: -1, defaultTo: 1 },
-  { value: 'odds:percent', label: 'Variacao percentual da odd', category: 'Odds', min: -100, max: 500, step: 0.1, defaultFrom: -20, defaultTo: 20 },
+  { value: 'liveOdds', label: 'Odd live atual do mercado escolhido', category: 'Odds live', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
+  { value: 'odds:initial', label: 'Odd inicial observada do mercado escolhido', category: 'Odds live', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
+  { value: 'odds:diff', label: 'Diferenca entre odd live atual e inicial', category: 'Odds live', min: -50, max: 50, step: 0.01, defaultFrom: -1, defaultTo: 1 },
+  { value: 'odds:percent', label: 'Variacao percentual da odd live', category: 'Odds live', min: -100, max: 500, step: 0.1, defaultFrom: -20, defaultTo: 20 },
   ...windows.flatMap((window) => [
-    { value: `odds:drop:${window}`, label: `Queda da odd nos ultimos ${window} minutos`, category: 'Odds', min: 0, max: 50, step: 0.01, defaultFrom: 0, defaultTo: 1 },
-    { value: `odds:rise:${window}`, label: `Subida da odd nos ultimos ${window} minutos`, category: 'Odds', min: 0, max: 50, step: 0.01, defaultFrom: 0, defaultTo: 1 },
+    { value: `odds:drop:${window}`, label: `Queda da odd live nos ultimos ${window} minutos`, category: 'Odds live', min: 0, max: 50, step: 0.01, defaultFrom: 0, defaultTo: 1 },
+    { value: `odds:rise:${window}`, label: `Subida da odd live nos ultimos ${window} minutos`, category: 'Odds live', min: 0, max: 50, step: 0.01, defaultFrom: 0, defaultTo: 1 },
   ]),
 ];
 
@@ -155,23 +155,245 @@ export const liveParameters: ParameterOption[] = [
   ...rhythmOptions,
 ];
 
+const preLiveReferences = [
+  ['home', 'mandante'],
+  ['away', 'visitante'],
+  ['favorite', 'favorito'],
+  ['underdog', 'zebra'],
+] as const;
+
+const historicalWindows = [
+  ['season', 'na temporada'],
+  ['last5', 'nos ultimos 5 jogos'],
+  ['last10', 'nos ultimos 10 jogos'],
+] as const;
+
+const preLiveStatOption = (
+  value: string,
+  label: string,
+  category: string,
+  min = 0,
+  max = 100,
+  step = 0.1,
+  defaultFrom: number | string = 0,
+  defaultTo: number | string = max,
+): ParameterOption => ({
+  value,
+  label,
+  category,
+  min,
+  max,
+  step,
+  defaultFrom,
+  defaultTo,
+});
+
+const goalsForOptions = preLiveReferences.flatMap(([reference, label]) =>
+  historicalWindows.map(([window, windowLabel]) =>
+    preLiveStatOption(`pre:goalsFor:${reference}:${window}`, `Media de gols marcados do ${label} ${windowLabel}`, 'Gols marcados', 0, 5, 0.1, 0.8, 2.5),
+  ),
+);
+
+const goalsAgainstOptions = preLiveReferences.flatMap(([reference, label]) =>
+  historicalWindows.map(([window, windowLabel]) =>
+    preLiveStatOption(`pre:goalsAgainst:${reference}:${window}`, `Media de gols sofridos do ${label} ${windowLabel}`, 'Gols sofridos', 0, 5, 0.1, 0.8, 2.5),
+  ),
+);
+
+const totalGoalsOptions: ParameterOption[] = [
+  ...preLiveReferences.flatMap(([reference, label]) =>
+    historicalWindows.map(([window, windowLabel]) =>
+      preLiveStatOption(`pre:totalGoals:${reference}:${window}`, `Media de gols totais do ${label} ${windowLabel}`, 'Gols totais', 0, 7, 0.1, 1.5, 3.5),
+    ),
+  ),
+  ...historicalWindows.map(([window, windowLabel]) =>
+    preLiveStatOption(`pre:totalGoals:combined:${window}`, `Media de gols totais combinada dos dois times ${windowLabel}`, 'Gols totais', 0, 7, 0.1, 1.8, 3.5),
+  ),
+];
+
+const bttsOptions: ParameterOption[] = [
+  ...preLiveReferences.flatMap(([reference, label]) =>
+    historicalWindows.map(([window, windowLabel]) =>
+      preLiveStatOption(`pre:btts:${reference}:${window}`, `Percentual BTTS Sim do ${label} ${windowLabel}`, 'BTTS', 0, 100, 1, 40, 80),
+    ),
+  ),
+  ...historicalWindows.map(([window, windowLabel]) =>
+    preLiveStatOption(`pre:btts:combined:${window}`, `Percentual BTTS Sim combinado dos dois times ${windowLabel}`, 'BTTS', 0, 100, 1, 45, 80),
+  ),
+];
+
+const overUnderLines = ['0.5', '1.5', '2.5', '3.5'] as const;
+
+const overUnderOptions: ParameterOption[] = [
+  ...(['home', 'away'] as const).flatMap((reference) =>
+    overUnderLines.flatMap((line) =>
+      historicalWindows.map(([window, windowLabel]) =>
+        preLiveStatOption(
+          `pre:over:${reference}:${line}:${window}`,
+          `Percentual Over ${line} FT do ${reference === 'home' ? 'mandante' : 'visitante'} ${windowLabel}`,
+          'Over/Under',
+          0,
+          100,
+          1,
+          50,
+          90,
+        ),
+      ),
+    ),
+  ),
+  ...['1.5', '2.5'].flatMap((line) =>
+    historicalWindows.map(([window, windowLabel]) =>
+      preLiveStatOption(`pre:over:combined:${line}:${window}`, `Percentual Over ${line} FT combinado ${windowLabel}`, 'Over/Under', 0, 100, 1, 50, 90),
+    ),
+  ),
+  ...['2.5', '3.5'].flatMap((line) =>
+    historicalWindows.map(([window, windowLabel]) =>
+      preLiveStatOption(`pre:under:combined:${line}:${window}`, `Percentual Under ${line} FT combinado ${windowLabel}`, 'Over/Under', 0, 100, 1, 40, 80),
+    ),
+  ),
+];
+
+const homeAwayOptions: ParameterOption[] = [
+  ['goalsForAvg', 'Media de gols marcados em casa', 'homeOnly', 'home'],
+  ['goalsAgainstAvg', 'Media de gols sofridos em casa', 'homeOnly', 'home'],
+  ['cornersAvg', 'Media de escanteios em casa', 'homeOnly', 'home'],
+  ['cardsAvg', 'Media de cartoes em casa', 'homeOnly', 'home'],
+  ['pointsAvg', 'Aproveitamento em casa', 'homeOnly', 'home'],
+  ['bttsPercent', 'Percentual BTTS em casa', 'homeOnly', 'home'],
+  ['over15Percent', 'Percentual Over 1.5 em casa', 'homeOnly', 'home'],
+  ['over25Percent', 'Percentual Over 2.5 em casa', 'homeOnly', 'home'],
+  ['goalsForAvg', 'Media de gols marcados fora', 'awayOnly', 'away'],
+  ['goalsAgainstAvg', 'Media de gols sofridos fora', 'awayOnly', 'away'],
+  ['cornersAvg', 'Media de escanteios fora', 'awayOnly', 'away'],
+  ['cardsAvg', 'Media de cartoes fora', 'awayOnly', 'away'],
+  ['pointsAvg', 'Aproveitamento fora', 'awayOnly', 'away'],
+  ['bttsPercent', 'Percentual BTTS fora', 'awayOnly', 'away'],
+  ['over15Percent', 'Percentual Over 1.5 fora', 'awayOnly', 'away'],
+  ['over25Percent', 'Percentual Over 2.5 fora', 'awayOnly', 'away'],
+].map(([field, label, window, reference]) =>
+  preLiveStatOption(`pre:homeAway:${reference}:${window}:${field}`, label, 'Casa/Fora', 0, field === 'pointsAvg' ? 3 : 100, field === 'pointsAvg' ? 0.1 : 1, 0, field === 'pointsAvg' ? 3 : 80),
+);
+
+const formOptions: ParameterOption[] = [
+  ...(['home', 'away'] as const).flatMap((reference) =>
+    [
+      ['wins', 'Vitorias'],
+      ['draws', 'Empates'],
+      ['losses', 'Derrotas'],
+      ['points', 'Pontos'],
+    ].map(([field, label]) =>
+      preLiveStatOption(`pre:form:${field}:${reference}:last5`, `${label} do ${reference === 'home' ? 'mandante' : 'visitante'} nos ultimos 5 jogos`, 'Forma recente', 0, field === 'points' ? 15 : 5, 1, 0, field === 'points' ? 10 : 3),
+    ),
+  ),
+  ...(['favorite', 'underdog'] as const).map((reference) =>
+    preLiveStatOption(`pre:form:points:${reference}:last5`, `Pontos do ${reference === 'favorite' ? 'favorito' : 'zebra'} nos ultimos 5 jogos`, 'Forma recente', 0, 15, 1, 0, 10),
+  ),
+  ...(['home', 'away'] as const).flatMap((reference) =>
+    [
+      ['winningStreak', 'Sequencia de vitorias'],
+      ['unbeatenStreak', 'Sequencia sem perder'],
+      ['winlessStreak', 'Sequencia sem vencer'],
+      ['concedingStreak', 'Sequencia de jogos sofrendo gol'],
+      ['scoringStreak', 'Sequencia de jogos marcando gol'],
+      ['bttsStreak', 'Sequencia de jogos BTTS'],
+      ['over15Streak', 'Sequencia de jogos Over 1.5'],
+      ['over25Streak', 'Sequencia de jogos Over 2.5'],
+    ].map(([field, label]) =>
+      preLiveStatOption(`pre:streak:${field}:${reference}`, `${label} - ${reference === 'home' ? 'mandante' : 'visitante'}`, 'Forma recente', 0, 20, 1, 0, 5),
+    ),
+  ),
+];
+
+const favoriteOptions: ParameterOption[] = [
+  { value: 'pre:favorite:isHome', label: 'Favorito e mandante', category: 'Tabela e favoritismo', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'pre:favorite:isAway', label: 'Favorito e visitante', category: 'Tabela e favoritismo', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'pre:underdog:isHome', label: 'Zebra e mandante', category: 'Tabela e favoritismo', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'pre:underdog:isAway', label: 'Zebra e visitante', category: 'Tabela e favoritismo', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  preLiveStatOption('pre:favorite:oddDiff', 'Diferenca de odd entre favorito e zebra', 'Tabela e favoritismo', 0, 20, 0.01, 0.2, 2),
+  preLiveStatOption('pre:favorite:percent', 'Percentual de favoritismo', 'Tabela e favoritismo', 0, 100, 1, 50, 80),
+  preLiveStatOption('pre:favorite:odd', 'Favorito com odd entre X e Y', 'Tabela e favoritismo', 1.01, 50, 0.01, 1.2, 2),
+  preLiveStatOption('pre:underdog:odd', 'Zebra com odd entre X e Y', 'Tabela e favoritismo', 1.01, 50, 0.01, 2, 6),
+  { value: 'pre:favorite:betterTablePosition', label: 'Favorito tem melhor posicao na tabela', category: 'Tabela e favoritismo', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'pre:underdog:betterTablePosition', label: 'Zebra tem melhor posicao na tabela', category: 'Tabela e favoritismo', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  preLiveStatOption('pre:diff:tablePosition', 'Diferenca de posicoes na tabela', 'Diferencas entre equipes', -30, 30, 1, 0, 10),
+  preLiveStatOption('pre:diff:performance', 'Diferenca de aproveitamento', 'Diferencas entre equipes', -100, 100, 1, 0, 30),
+  preLiveStatOption('pre:diff:goalsForSeason', 'Diferenca de media de gols marcados', 'Diferencas entre equipes', -5, 5, 0.1, 0, 1.5),
+  preLiveStatOption('pre:diff:goalsAgainstSeason', 'Diferenca de media de gols sofridos', 'Diferencas entre equipes', -5, 5, 0.1, 0, 1.5),
+  preLiveStatOption('pre:diff:formPointsLast5', 'Diferenca de forma recente', 'Diferencas entre equipes', -15, 15, 1, 0, 6),
+];
+
+const preLiveOddsOptions: ParameterOption[] = [
+  ['home', 'Mandante'],
+  ['draw', 'Empate'],
+  ['away', 'Visitante'],
+  ['favorite', 'Favorito'],
+  ['underdog', 'Zebra'],
+  ['over05', 'Over 0.5 FT'],
+  ['over15', 'Over 1.5 FT'],
+  ['over25', 'Over 2.5 FT'],
+  ['over35', 'Over 3.5 FT'],
+  ['under05', 'Under 0.5 FT'],
+  ['under15', 'Under 1.5 FT'],
+  ['under25', 'Under 2.5 FT'],
+  ['under35', 'Under 3.5 FT'],
+  ['bttsYes', 'BTTS Sim'],
+  ['bttsNo', 'BTTS Nao'],
+  ['over05HT', 'Over 0.5 HT'],
+  ['over15HT', 'Over 1.5 HT'],
+  ['under05HT', 'Under 0.5 HT'],
+  ['under15HT', 'Under 1.5 HT'],
+].map(([field, label]) => preLiveStatOption(`pre:odds:${field}`, `Odd pre-live - ${label}`, 'Odds pre-live', 1.01, 50, 0.01, 1.5, 3));
+
+const cornersCardsOptions: ParameterOption[] = [
+  ...(['home', 'away'] as const).flatMap((reference) =>
+    historicalWindows.flatMap(([window, windowLabel]) => [
+      preLiveStatOption(`pre:corners:${reference}:${window}`, `Media de escanteios do ${reference === 'home' ? 'mandante' : 'visitante'} ${windowLabel}`, 'Escanteios historicos', 0, 20, 0.1, 3, 8),
+      preLiveStatOption(`pre:cards:${reference}:${window}`, `Media de cartoes do ${reference === 'home' ? 'mandante' : 'visitante'} ${windowLabel}`, 'Cartoes historicos', 0, 12, 0.1, 1, 5),
+    ]),
+  ),
+  ...historicalWindows.flatMap(([window, windowLabel]) => [
+    preLiveStatOption(`pre:corners:combined:${window}`, `Media de escanteios combinada dos dois times ${windowLabel}`, 'Escanteios historicos', 0, 25, 0.1, 6, 14),
+    preLiveStatOption(`pre:cards:combined:${window}`, `Media de cartoes combinada dos dois times ${windowLabel}`, 'Cartoes historicos', 0, 16, 0.1, 2, 8),
+  ]),
+];
+
+const historicalShotsOptions: ParameterOption[] = [
+  ...preLiveReferences.flatMap(([reference, label]) =>
+    historicalWindows.flatMap(([window, windowLabel]) => [
+      preLiveStatOption(`pre:shots:${reference}:${window}`, `Media de finalizacoes do ${label} ${windowLabel}`, 'Finalizacoes historicas', 0, 40, 0.1, 6, 18),
+      preLiveStatOption(`pre:shotsOnTarget:${reference}:${window}`, `Media de finalizacoes no alvo do ${label} ${windowLabel}`, 'Finalizacoes historicas', 0, 20, 0.1, 2, 8),
+    ]),
+  ),
+];
+
 export const preLiveParameters: ParameterOption[] = [
-  { value: 'championship', label: 'Campeonato', category: 'Pre-live', valueType: 'text' },
-  { value: 'season', label: 'Temporada', category: 'Pre-live', valueType: 'text' },
-  { value: 'homeTeam', label: 'Time mandante', category: 'Pre-live', valueType: 'text' },
-  { value: 'awayTeam', label: 'Time visitante', category: 'Pre-live', valueType: 'text' },
-  { value: 'tablePosition', label: 'Posicao na tabela', category: 'Pre-live', min: 1, max: 30, defaultFrom: 1, defaultTo: 12 },
-  { value: 'performance', label: 'Aproveitamento (%)', category: 'Pre-live', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
-  { value: 'averageGoals', label: 'Media de gols', category: 'Pre-live', min: 0, max: 6, step: 0.1, defaultFrom: 1.5, defaultTo: 4 },
-  { value: 'averageCorners', label: 'Media de escanteios', category: 'Pre-live', min: 0, max: 20, step: 0.1, defaultFrom: 6, defaultTo: 14 },
-  { value: 'averageCards', label: 'Media de cartoes', category: 'Pre-live', min: 0, max: 12, step: 0.1, defaultFrom: 0, defaultTo: 6 },
-  { value: 'winningStreak', label: 'Sequencia de vitorias', category: 'Pre-live', min: 0, max: 15, defaultFrom: 0, defaultTo: 5 },
-  { value: 'losingStreak', label: 'Sequencia de derrotas', category: 'Pre-live', min: 0, max: 15, defaultFrom: 0, defaultTo: 3 },
-  { value: 'headToHead', label: 'Confronto direto', category: 'Pre-live', min: 0, max: 10, step: 0.1, defaultFrom: 0, defaultTo: 4 },
-  { value: 'offensiveStrength', label: 'Forca ofensiva', category: 'Pre-live', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
-  { value: 'defensiveStrength', label: 'Forca defensiva', category: 'Pre-live', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
-  { value: 'favoritism', label: 'Favoritismo (%)', category: 'Pre-live', min: 0, max: 100, defaultFrom: 50, defaultTo: 100 },
-  { value: 'preLiveOdds', label: 'Odds pre-live', category: 'Pre-live', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
+  { value: 'championship', label: 'Campeonato', category: 'Identificacao da partida', valueType: 'text' },
+  { value: 'season', label: 'Temporada', category: 'Identificacao da partida', valueType: 'text' },
+  { value: 'homeTeam', label: 'Time mandante', category: 'Identificacao da partida', valueType: 'text' },
+  { value: 'awayTeam', label: 'Time visitante', category: 'Identificacao da partida', valueType: 'text' },
+  { value: 'tablePosition', label: 'Posicao na tabela - legado', category: 'Tabela e favoritismo', min: 1, max: 30, defaultFrom: 1, defaultTo: 12 },
+  { value: 'performance', label: 'Aproveitamento (%) - legado', category: 'Tabela e favoritismo', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
+  { value: 'favoritism', label: 'Favoritismo pre-live (%) - legado', category: 'Tabela e favoritismo', min: 0, max: 100, defaultFrom: 50, defaultTo: 100 },
+  { value: 'preLiveOdds', label: 'Odds pre-live - mercado escolhido', category: 'Odds pre-live', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
+  { value: 'averageGoals', label: 'Media de gols - legado', category: 'Gols totais', min: 0, max: 6, step: 0.1, defaultFrom: 1.5, defaultTo: 4 },
+  { value: 'averageCorners', label: 'Media de escanteios - legado', category: 'Escanteios historicos', min: 0, max: 20, step: 0.1, defaultFrom: 6, defaultTo: 14 },
+  { value: 'averageCards', label: 'Media de cartoes - legado', category: 'Cartoes historicos', min: 0, max: 12, step: 0.1, defaultFrom: 0, defaultTo: 6 },
+  { value: 'winningStreak', label: 'Sequencia de vitorias - legado', category: 'Forma recente', min: 0, max: 15, defaultFrom: 0, defaultTo: 5 },
+  { value: 'losingStreak', label: 'Sequencia de derrotas - legado', category: 'Forma recente', min: 0, max: 15, defaultFrom: 0, defaultTo: 3 },
+  { value: 'headToHead', label: 'Confronto direto', category: 'Confronto direto', min: 0, max: 10, step: 0.1, defaultFrom: 0, defaultTo: 4 },
+  { value: 'offensiveStrength', label: 'Forca ofensiva historica - legado', category: 'Finalizacoes historicas', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
+  { value: 'defensiveStrength', label: 'Forca defensiva historica - legado', category: 'Gols sofridos', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
+  ...preLiveOddsOptions,
+  ...favoriteOptions,
+  ...goalsForOptions,
+  ...goalsAgainstOptions,
+  ...totalGoalsOptions,
+  ...bttsOptions,
+  ...overUnderOptions,
+  ...homeAwayOptions,
+  ...formOptions,
+  ...cornersCardsOptions,
+  ...historicalShotsOptions,
 ];
 
 export const getParameterOptions = (mode: BotMode) => (mode === 'live' ? liveParameters : preLiveParameters);

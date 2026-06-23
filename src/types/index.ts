@@ -26,6 +26,86 @@ export interface HistoricalOdd {
   handicap?: string | null;
 }
 
+export interface PreLiveOdds {
+  home?: number;
+  draw?: number;
+  away?: number;
+  favorite?: number;
+  underdog?: number;
+  over05?: number;
+  over15?: number;
+  over25?: number;
+  over35?: number;
+  under05?: number;
+  under15?: number;
+  under25?: number;
+  under35?: number;
+  bttsYes?: number;
+  bttsNo?: number;
+  over05HT?: number;
+  over15HT?: number;
+  under05HT?: number;
+  under15HT?: number;
+}
+
+export interface TeamHistoricalStats {
+  games: number;
+  wins?: number;
+  draws?: number;
+  losses?: number;
+  points?: number;
+  pointsAvg?: number;
+  goalsForAvg?: number;
+  goalsAgainstAvg?: number;
+  totalGoalsAvg?: number;
+  bttsPercent?: number;
+  over05Percent?: number;
+  over15Percent?: number;
+  over25Percent?: number;
+  over35Percent?: number;
+  under25Percent?: number;
+  under35Percent?: number;
+  cornersAvg?: number;
+  cardsAvg?: number;
+  shotsAvg?: number;
+  shotsOnTargetAvg?: number;
+  cleanSheetsPercent?: number;
+  failedToScorePercent?: number;
+  winningStreak?: number;
+  unbeatenStreak?: number;
+  winlessStreak?: number;
+  scoringStreak?: number;
+  concedingStreak?: number;
+  bttsStreak?: number;
+  over15Streak?: number;
+  over25Streak?: number;
+}
+
+export interface TeamPreLiveHistory {
+  season?: TeamHistoricalStats;
+  last5?: TeamHistoricalStats;
+  last10?: TeamHistoricalStats;
+  homeOnly?: TeamHistoricalStats;
+  awayOnly?: TeamHistoricalStats;
+}
+
+export interface FavoritePreLiveInfo {
+  side: 'home' | 'away' | 'none';
+  odd?: number;
+  underdogOdd?: number;
+  favoritismPercent?: number;
+}
+
+export interface PreLiveDifferences {
+  tablePosition?: number;
+  formPointsLast5?: number;
+  goalsForSeason?: number;
+  goalsAgainstSeason?: number;
+  bttsPercent?: number;
+  over25Percent?: number;
+  performance?: number;
+}
+
 export interface LiveStats {
   shots: number;
   shotsOnTarget: number;
@@ -41,6 +121,8 @@ export interface LiveStats {
 }
 
 export interface GameSnapshot {
+  capturedAt?: string;
+  fixtureDate?: string;
   minute: number;
   scoreHome: number;
   scoreAway: number;
@@ -67,6 +149,7 @@ export interface Game {
   currentMinute: number;
   finalScoreHome: number;
   finalScoreAway: number;
+  fixtureDate?: string;
   preLive: {
     homeOdd: number;
     drawOdd: number;
@@ -75,11 +158,17 @@ export interface Game {
     over25Odd: number;
     under25Odd: number;
     bttsOdd: number;
-    averageGoals: number;
-    averageCorners: number;
-    h2hGoals: number;
-    tablePositionGap: number;
-    favoritism: number;
+    averageGoals?: number;
+    averageCorners?: number;
+    h2hGoals?: number;
+    tablePositionGap?: number;
+    favoritism?: number;
+    season?: number;
+    odds?: PreLiveOdds;
+    home?: TeamPreLiveHistory;
+    away?: TeamPreLiveHistory;
+    favorite?: FavoritePreLiveInfo;
+    differences?: PreLiveDifferences;
   };
   snapshots: GameSnapshot[];
 }
