@@ -162,7 +162,7 @@ export default function App() {
       <Sidebar activePage={page} onNavigate={navigate} />
       <Topbar title={titles[page]} activePage={page} onNavigate={navigate} />
       <main className="px-4 py-6 lg:ml-72 lg:px-8">
-        <div className="mx-auto max-w-7xl">{content}</div>
+        <div className={`mx-auto ${page === 'replay' ? 'max-w-none' : 'max-w-7xl'}`}>{content}</div>
       </main>
     </div>
   );
