@@ -46,6 +46,17 @@ const getEntryOdd = (bot: Bot, snapshot: GameSnapshot, game: Game) =>
 const getFilterOdd = (bot: Bot, snapshot: GameSnapshot, game: Game) =>
   getOddForMarket(bot.oddMarket ?? bot.market, snapshot, game);
 
+const isMarketSettledAtSnapshot = (bot: Bot, snapshot: GameSnapshot) => {
+  const market = (bot.market ?? bot.oddMarket ?? '').toLowerCase();
+  const totalGoals = snapshot.scoreHome + snapshot.scoreAway;
+  const goalMarket = parseGoalMarket(market);
+
+  if (goalMarket) return totalGoals > goalMarket.line;
+  if (market.includes('ambas') || market.includes('btts')) return snapshot.scoreHome > 0 && snapshot.scoreAway > 0;
+
+  return false;
+};
+
 const includesText = (source: string, filters?: string[]) => {
   const normalized = normalizeText(source);
   const activeFilters = (filters ?? []).map(normalizeText).filter(Boolean);
@@ -224,6 +235,7 @@ export const shouldEnter = (bot: Bot, game: Game, snapshot: GameSnapshot) => {
 const getCashOut = (bot: Bot, game: Game, entrySnapshot: GameSnapshot, entryOdd: number) => {
   const cashOut = bot.cashOut;
   if (!cashOut?.enabled) return undefined;
+  if (isMarketSettledAtSnapshot(bot, entrySnapshot)) return undefined;
 
   const fromMinute = cashOut.fromMinute ?? entrySnapshot.minute;
   const toMinute = cashOut.toMinute ?? 150;
@@ -231,6 +243,7 @@ const getCashOut = (bot: Bot, game: Game, entrySnapshot: GameSnapshot, entryOdd:
 
   return game.snapshots.find((snapshot) => {
     if (snapshot.minute < fromMinute || snapshot.minute > toMinute || snapshot.minute <= entrySnapshot.minute) return false;
+    if (isMarketSettledAtSnapshot(bot, snapshot)) return false;
     if (exitRules.length === 0) return true;
     const currentOdd = getEntryOdd(bot, snapshot, game);
     return evaluateRuleList(exitRules, bot, game, snapshot, currentOdd).passed;
