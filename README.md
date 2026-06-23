@@ -62,8 +62,8 @@ Configure as variaveis no Render:
 ```env
 API_FOOTBALL_TOKEN=sua_chave_da_api_football
 API_FOOTBALL_BASE_URL=https://v3.football.api-sports.io
-API_FOOTBALL_SNAPSHOT_PATH=/var/data/api-football-snapshots.jsonl
-API_FOOTBALL_COLLECTOR_STATE_PATH=/var/data/api-football-collector-state.json
+DATABASE_URL=postgresql://usuario:senha@host:5432/banco
+DATABASE_SSL=true
 API_FOOTBALL_COLLECTOR_ENABLED=true
 API_FOOTBALL_COLLECTOR_INTERVAL_MS=90000
 API_FOOTBALL_COLLECTOR_MAX_FIXTURES=2
@@ -79,3 +79,23 @@ BACKEND_ALLOWED_ORIGIN=https://seu-site.vercel.app
 O Render fornece a porta automaticamente pela variavel `PORT`, entao nao precisa configurar `BACKEND_PORT` la. Use `BACKEND_PORT=3333` apenas localmente ou em hospedagens que nao fornecem `PORT`.
 
 Use uma chave nova da API-Football se a chave anterior ja foi compartilhada em conversas, prints ou logs.
+
+### Banco historico PostgreSQL
+
+O backend usa PostgreSQL quando `DATABASE_URL` esta configurada. Sem essa variavel, ele volta ao modo local e grava snapshots em JSONL.
+
+No Render, crie um banco em **New > Postgres** e use a **Internal Database URL** no Web Service quando o banco e o backend estiverem na mesma conta/regiao. Se usar Supabase, Neon ou outro provedor, use a connection string PostgreSQL fornecida por ele.
+
+O backend cria automaticamente a tabela `raw_api_snapshots` e os indices necessarios na primeira execucao.
+
+Para importar o arquivo JSONL local para o banco, configure `DATABASE_URL` em `.env.local` e rode:
+
+```bash
+npm run db:import-snapshots
+```
+
+Se quiser importar outro arquivo, informe:
+
+```env
+SNAPSHOT_IMPORT_PATH=caminho/para/api-football-snapshots.jsonl
+```

@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { createSnapshotStore } from './snapshotStore.mjs';
 
 const envFiles = ['.env.local', '.env'];
 
@@ -33,6 +33,9 @@ const apiFootballToken = process.env.API_FOOTBALL_TOKEN;
 const allowedOrigin = process.env.BACKEND_ALLOWED_ORIGIN ?? '*';
 const snapshotPath = resolve(process.cwd(), process.env.API_FOOTBALL_SNAPSHOT_PATH ?? 'server/storage/api-football-snapshots.jsonl');
 const collectorStatePath = resolve(process.cwd(), process.env.API_FOOTBALL_COLLECTOR_STATE_PATH ?? 'server/storage/api-football-collector-state.json');
+const databaseUrl = process.env.DATABASE_URL;
+const databaseSsl = process.env.DATABASE_SSL !== 'false';
+const snapshotStore = createSnapshotStore({ snapshotPath, databaseUrl, databaseSsl });
 const collectorEnabled = process.env.API_FOOTBALL_COLLECTOR_ENABLED !== 'false';
 const collectorIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_INTERVAL_MS ?? 90000);
 const collectorMaxFixtures = Number(process.env.API_FOOTBALL_COLLECTOR_MAX_FIXTURES ?? 2);
@@ -71,6 +74,8 @@ const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
 const getCollectorDay = () => new Date().toISOString().slice(0, 10);
 
 const persistCollectorBudget = () => {
+  if (databaseUrl) return;
+
   mkdirSync(dirname(collectorStatePath), { recursive: true });
   writeFileSync(
     collectorStatePath,
@@ -88,6 +93,7 @@ const persistCollectorBudget = () => {
 };
 
 const loadCollectorBudget = () => {
+  if (databaseUrl) return;
   if (!existsSync(collectorStatePath)) return;
 
   try {
@@ -146,28 +152,9 @@ const readBody = (request) =>
     request.on('error', reject);
   });
 
-const getSnapshotCount = async () => {
-  if (!existsSync(snapshotPath)) return 0;
-  const content = await readFile(snapshotPath, 'utf8');
-  return content.trim() ? content.trim().split(/\r?\n/).length : 0;
-};
+const getSnapshotCount = () => snapshotStore.getSnapshotCount();
 
-const readRawSnapshots = async () => {
-  if (!existsSync(snapshotPath)) return [];
-
-  const content = await readFile(snapshotPath, 'utf8');
-  return content
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return undefined;
-      }
-    })
-    .filter(Boolean);
-};
+const readRawSnapshots = () => snapshotStore.readRawSnapshots();
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
@@ -404,20 +391,14 @@ const getSnapshotKind = (apiPath, searchParams) => {
 const persistSnapshot = async ({ kind, apiPath, query, payload }) => {
   if (!kind) return false;
 
-  await mkdir(dirname(snapshotPath), { recursive: true });
-  await appendFile(
-    snapshotPath,
-    `${JSON.stringify({
-      capturedAt: new Date().toISOString(),
-      provider: 'api-football',
-      kind,
-      apiPath,
-      query,
-      payload,
-    })}\n`,
-    'utf8',
-  );
-  return true;
+  return snapshotStore.persistSnapshot({
+    capturedAt: new Date().toISOString(),
+    provider: 'api-football',
+    kind,
+    apiPath,
+    query,
+    payload,
+  });
 };
 
 const buildApiUrl = (apiPath, query = {}) => {
@@ -648,6 +629,7 @@ const server = createServer(async (request, response) => {
       provider: 'api-football',
       hasToken: Boolean(apiFootballToken),
       baseUrl: apiFootballBaseUrl,
+      storageMode: snapshotStore.mode,
       snapshotPath,
       collectorStatePath,
       snapshotCount: await getSnapshotCount(),
