@@ -196,6 +196,7 @@ const evaluateDynamicRules = (bot: Bot, game: Game, snapshot: GameSnapshot, odd:
 };
 
 const passesOddFilter = (bot: Bot, odd: number) => {
+  if (!Number.isFinite(odd) || odd <= 1.01) return { passed: false, reason: 'Odd historica indisponivel neste snapshot' };
   if (bot.minOdd !== undefined && odd < bot.minOdd) return { passed: false, reason: 'Odd abaixo da mínima configurada' };
   if (bot.maxOdd !== undefined && odd > bot.maxOdd) return { passed: false, reason: 'Odd acima da máxima configurada' };
   return { passed: true, reason: 'Odd dentro do intervalo' };
@@ -371,10 +372,10 @@ export const runBacktest = (bot: Bot, games: Game[] = []): { result: BacktestRes
   };
 };
 
-export const runAllRankings = (bots: Bot[]): MethodRanking[] =>
+export const runAllRankings = (bots: Bot[], games: Game[] = []): MethodRanking[] =>
   bots
     .map((bot) => {
-      const { result } = runBacktest(bot);
+      const { result } = runBacktest(bot, games);
       return {
         botId: bot.id,
         botName: bot.name,

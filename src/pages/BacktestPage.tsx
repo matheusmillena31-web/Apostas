@@ -7,13 +7,16 @@ import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { StatCard } from '../components/StatCard';
 import { runBacktest } from '../services/backtest';
-import { BacktestResult, Bot, BotLog, TradeEntry } from '../types';
+import { loadHistoricalBacktestGames } from '../services/replayToBacktest';
+import { BacktestResult, Bot, BotLog, Game, TradeEntry } from '../types';
 import { formatCurrency, formatNumber, formatPercent } from '../utils/formatters';
 
 type BacktestPageProps = {
   bots: Bot[];
   selectedBot?: Bot;
   initialResult?: BacktestResult;
+  historicalGames: Game[];
+  onHistoricalGamesLoaded: (games: Game[]) => void;
   onResult: (result: BacktestResult, logs: BotLog[]) => void;
 };
 
@@ -262,7 +265,7 @@ function AdvancedStats({ entries }: { entries: TradeEntry[] }) {
   );
 }
 
-export function BacktestPage({ bots, selectedBot, initialResult, onResult }: BacktestPageProps) {
+export function BacktestPage({ bots, selectedBot, initialResult, historicalGames, onHistoricalGamesLoaded, onResult }: BacktestPageProps) {
   const bot = useMemo(() => {
     if (selectedBot) return bots.find((item) => item.id === selectedBot.id) ?? selectedBot;
     return bots[0];
@@ -271,6 +274,8 @@ export function BacktestPage({ bots, selectedBot, initialResult, onResult }: Bac
   const [result, setResult] = useState<BacktestResult | undefined>(() =>
     initialResult?.botId === bot?.id ? initialResult : undefined,
   );
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | undefined>();
 
   useEffect(() => {
     setResult(initialResult?.botId === bot?.id ? initialResult : undefined);
@@ -281,11 +286,23 @@ export function BacktestPage({ bots, selectedBot, initialResult, onResult }: Bac
     [result?.entries],
   );
 
-  const handleRun = () => {
+  const handleRun = async () => {
     if (!bot) return;
-    const output = runBacktest(bot);
-    setResult(output.result);
-    onResult(output.result, output.logs);
+    setLoading(true);
+    setLoadError(undefined);
+
+    try {
+      const games = historicalGames.length > 0 ? historicalGames : await loadHistoricalBacktestGames();
+      if (historicalGames.length === 0) onHistoricalGamesLoaded(games);
+
+      const output = runBacktest(bot, games);
+      setResult(output.result);
+      onResult(output.result, output.logs);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Nao foi possivel carregar a base historica.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -293,14 +310,20 @@ export function BacktestPage({ bots, selectedBot, initialResult, onResult }: Bac
       <PageHeader
         title="Backtest"
         description="Teste um metodo contra a base historica de snapshots reais quando houver volume suficiente de odds minuto a minuto."
-        action={bot && <Button onClick={handleRun} icon={<Play className="h-4 w-4" />}>Rodar backtest</Button>}
+        action={
+          bot && (
+            <Button onClick={handleRun} disabled={loading} icon={<Play className="h-4 w-4" />}>
+              {loading ? 'Carregando base...' : 'Rodar backtest'}
+            </Button>
+          )
+        }
       />
       {bots.length === 0 || !bot ? (
         <EmptyState title="Nenhum bot disponivel" description="Crie um bot para executar o motor de backtest." />
       ) : (
         <div className="space-y-5">
           <Card title={bot.name || 'Bot sem nome'} subtitle="Bot selecionado para o backtest atual.">
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-5">
               <div className="rounded-lg border border-white/8 bg-ink-900/70 p-4 md:col-span-2">
                 <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Descricao</p>
                 <p className="mt-2 text-sm text-slate-300">{bot.description || 'Sem descricao cadastrada.'}</p>
@@ -317,7 +340,12 @@ export function BacktestPage({ bots, selectedBot, initialResult, onResult }: Bac
                     : 'Sem filtro'}
                 </p>
               </div>
+              <div className="rounded-lg border border-white/8 bg-ink-900/70 p-4">
+                <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Base historica</p>
+                <p className="mt-2 font-semibold text-white">{historicalGames.length || 'Nao carregada'}</p>
+              </div>
             </div>
+            {loadError && <p className="mt-4 text-sm font-medium text-red-300">{loadError}</p>}
           </Card>
 
           {result ? (

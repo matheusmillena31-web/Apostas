@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { runAllRankings, runBacktest } from './services/backtest';
+import { loadHistoricalBacktestGames } from './services/replayToBacktest';
 import { storage } from './services/storage';
-import { Bot, BacktestResult, BotLog } from './types';
+import { Bot, BacktestResult, BotLog, Game } from './types';
 import { Dashboard } from './pages/Dashboard';
 import { BotsPage, duplicateBot } from './pages/BotsPage';
 import { BotEditor } from './pages/BotEditor';
@@ -51,8 +52,9 @@ export default function App() {
   const [botEditorOpen, setBotEditorOpen] = useState(false);
   const [selectedBacktestBot, setSelectedBacktestBot] = useState<Bot | undefined>();
   const [selectedBacktestResult, setSelectedBacktestResult] = useState<BacktestResult | undefined>();
+  const [historicalGames, setHistoricalGames] = useState<Game[]>([]);
 
-  const rankings = useMemo(() => runAllRankings(bots), [bots]);
+  const rankings = useMemo(() => runAllRankings(bots, historicalGames), [bots, historicalGames]);
 
   const navigate = (nextPage: PageKey) => {
     setEditingBot(undefined);
@@ -96,12 +98,26 @@ export default function App() {
     setLogs(storage.appendLogs(newLogs));
   };
 
-  const runBotBacktest = (bot: Bot) => {
-    const output = runBacktest(bot);
-    saveBacktest(output.result, output.logs);
+  const getHistoricalGames = async () => {
+    if (historicalGames.length > 0) return historicalGames;
+    const games = await loadHistoricalBacktestGames();
+    setHistoricalGames(games);
+    return games;
+  };
+
+  const runBotBacktest = async (bot: Bot) => {
     setSelectedBacktestBot(bot);
-    setSelectedBacktestResult(output.result);
+    setSelectedBacktestResult(undefined);
     setPage('backtest');
+
+    try {
+      const games = await getHistoricalGames();
+      const output = runBacktest(bot, games);
+      saveBacktest(output.result, output.logs);
+      setSelectedBacktestResult(output.result);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Nao foi possivel carregar a base historica para o backtest.');
+    }
   };
 
   const content = (() => {
@@ -138,6 +154,8 @@ export default function App() {
             bots={bots}
             selectedBot={selectedBacktestBot}
             initialResult={selectedBacktestResult}
+            historicalGames={historicalGames}
+            onHistoricalGamesLoaded={setHistoricalGames}
             onResult={(result, newLogs) => {
               saveBacktest(result, newLogs);
               setSelectedBacktestResult(result);
