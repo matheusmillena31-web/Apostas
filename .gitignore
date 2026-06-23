@@ -5,6 +5,7 @@ server/storage/
 .env
 .env.*
 !.env.example
+!.env.vercel.example
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
