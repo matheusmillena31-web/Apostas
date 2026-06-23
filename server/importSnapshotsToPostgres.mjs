@@ -36,7 +36,7 @@ const snapshotPath = resolve(
     'server/storage/api-football-snapshots.jsonl',
 );
 
-if (!databaseUrl) {
+if (!databaseUrl || databaseUrl.includes('usuario:senha@host') || databaseUrl.includes('user:password@host')) {
   console.error('DATABASE_URL ausente. Configure a URL do PostgreSQL antes de importar.');
   process.exit(1);
 }

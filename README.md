@@ -4,6 +4,14 @@ Aplicacao React/Vite para simulacao de trading esportivo com backend Node para c
 
 ## Desenvolvimento local
 
+Este e o modo prioritario do projeto no momento. O backend local grava e le os snapshots em:
+
+```text
+server/storage/api-football-snapshots.jsonl
+```
+
+Nao configure `DATABASE_URL` para rodar localmente em modo arquivo.
+
 1. Instale as dependencias:
 
 ```bash
@@ -20,7 +28,15 @@ npm run dev
 
 O frontend usa `/api/football` localmente e o Vite redireciona para o backend em `http://localhost:3333`.
 
+Para conferir se o backend esta vivo:
+
+```text
+http://localhost:3333/api/football/health
+```
+
 ## Deploy: Vercel somente para o site
+
+Deploy pausado por enquanto. As instrucoes abaixo ficam como referencia futura.
 
 O Vercel deve hospedar apenas o frontend estatico. O backend atual precisa continuar em um host Node persistente, como Render, Railway, Fly.io ou VPS, porque ele usa um servidor continuo e grava os snapshots em `server/storage`.
 

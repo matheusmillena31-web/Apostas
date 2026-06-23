@@ -14,8 +14,14 @@ const createSnapshot = ({ capturedAt = new Date().toISOString(), provider = 'api
   payload,
 });
 
+const isUsableDatabaseUrl = (value) =>
+  typeof value === 'string' &&
+  /^postgres(?:ql)?:\/\//i.test(value) &&
+  !value.includes('usuario:senha@host') &&
+  !value.includes('user:password@host');
+
 export const createSnapshotStore = ({ snapshotPath, databaseUrl, databaseSsl = true }) => {
-  const pool = databaseUrl
+  const pool = isUsableDatabaseUrl(databaseUrl)
     ? new Pool({
         connectionString: databaseUrl,
         ssl: databaseSsl ? { rejectUnauthorized: false } : false,
