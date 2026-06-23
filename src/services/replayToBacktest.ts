@@ -1,5 +1,5 @@
 import { apiFootballService } from './apiFootball';
-import { Game, GameSnapshot, LiveStats } from '../types';
+import { Game, GameSnapshot, LiveStats, TeamLiveStats } from '../types';
 import { ApiFootballOddsBet, ApiFootballReplayGame, ApiFootballReplaySnapshot } from '../types/api';
 
 const FALLBACK_ODD = 1.01;
@@ -24,6 +24,18 @@ const toOdd = (value: unknown) => {
 
 const getOddsMarkets = (snapshot: ApiFootballReplaySnapshot): ApiFootballOddsBet[] =>
   snapshot.odds?.flatMap((item) => [...(item.odds ?? []), ...(item.bookmakers?.flatMap((bookmaker) => bookmaker.bets) ?? [])]) ?? [];
+
+const flattenHistoricalOdds = (snapshot: ApiFootballReplaySnapshot) =>
+  getOddsMarkets(snapshot).flatMap((market) =>
+    market.values
+      .map((value) => ({
+        marketName: market.name,
+        value: value.value,
+        handicap: value.handicap,
+        odd: toOdd(value.odd),
+      }))
+      .filter((value): value is { marketName: string; value: string; handicap: string | null | undefined; odd: number } => value.odd !== undefined),
+  );
 
 const isMatchOddsMarket = (market: ApiFootballOddsBet) => {
   const name = normalizeText(market.name);
@@ -77,10 +89,47 @@ const sumStat = (snapshot: ApiFootballReplaySnapshot, labels: string[]) =>
     return sum + toNumber(item?.value, 0);
   }, 0) ?? 0;
 
+const getTeamStat = (snapshot: ApiFootballReplaySnapshot, teamId: number | undefined, labels: string[]) => {
+  if (!teamId) return undefined;
+  const teamStats = snapshot.statistics?.find((item) => item.team.id === teamId);
+  const stat = teamStats?.statistics?.find((item) =>
+    labels.some((label) => normalizeText(item.type) === normalizeText(label)),
+  );
+
+  if (stat?.value === undefined || stat.value === null) return undefined;
+  return toNumber(stat.value, Number.NaN);
+};
+
+const buildTeamStats = (snapshot: ApiFootballReplaySnapshot, teamId: number | undefined): TeamLiveStats => {
+  const yellowCards = getTeamStat(snapshot, teamId, ['Yellow Cards', 'Cartoes Amarelos']);
+  const redCards = getTeamStat(snapshot, teamId, ['Red Cards', 'Cartoes Vermelhos']);
+  const cards =
+    yellowCards === undefined && redCards === undefined
+      ? undefined
+      : (yellowCards ?? 0) + (redCards ?? 0);
+
+  return {
+    shots: getTeamStat(snapshot, teamId, ['Total Shots', 'Total de Chutes']),
+    shotsOnTarget: getTeamStat(snapshot, teamId, ['Shots on Goal', 'Chutes no Gol']),
+    dangerousAttacks: getTeamStat(snapshot, teamId, ['Dangerous Attacks', 'Ataques Perigosos']),
+    attacks: getTeamStat(snapshot, teamId, ['Attacks', 'Ataques']),
+    corners: getTeamStat(snapshot, teamId, ['Corner Kicks', 'Escanteios']),
+    possession: getTeamStat(snapshot, teamId, ['Ball Possession', 'Posse de Bola']),
+    yellowCards,
+    redCards,
+    cards,
+  };
+};
+
 const buildStats = (snapshot: ApiFootballReplaySnapshot): LiveStats => {
+  const homeTeamId = snapshot.fixture?.teams?.home?.id;
+  const awayTeamId = snapshot.fixture?.teams?.away?.id;
+  const home = buildTeamStats(snapshot, homeTeamId);
+  const away = buildTeamStats(snapshot, awayTeamId);
   const shots = sumStat(snapshot, ['Total Shots', 'Total de Chutes']);
   const shotsOnTarget = sumStat(snapshot, ['Shots on Goal', 'Chutes no Gol']);
   const dangerousAttacks = sumStat(snapshot, ['Dangerous Attacks', 'Ataques Perigosos']);
+  const attacks = sumStat(snapshot, ['Attacks', 'Ataques']);
   const corners = sumStat(snapshot, ['Corner Kicks', 'Escanteios']);
   const possession = sumStat(snapshot, ['Ball Possession', 'Posse de Bola']);
   const yellowCards = sumStat(snapshot, ['Yellow Cards', 'Cartoes Amarelos']);
@@ -90,11 +139,14 @@ const buildStats = (snapshot: ApiFootballReplaySnapshot): LiveStats => {
     shots,
     shotsOnTarget,
     dangerousAttacks,
+    attacks,
     corners,
     possession,
     cards: yellowCards + redCards,
     offensivePressure: dangerousAttacks + shotsOnTarget,
     recentShots: shots,
+    home,
+    away,
   };
 };
 
@@ -112,9 +164,12 @@ const convertSnapshot = (snapshot: ApiFootballReplaySnapshot, previous?: GameSna
   minute: snapshot.minute ?? 0,
   scoreHome: snapshot.score?.home ?? 0,
   scoreAway: snapshot.score?.away ?? 0,
+  halfTimeScoreHome: snapshot.fixture?.score?.halftime?.home,
+  halfTimeScoreAway: snapshot.fixture?.score?.halftime?.away,
   ...getSnapshotOdds(snapshot, previous),
   stats: buildStats(snapshot),
   events: snapshot.events?.map((event) => [event.type, event.detail].filter(Boolean).join(' ')) ?? [],
+  odds: flattenHistoricalOdds(snapshot),
 });
 
 export const convertReplayGameToBacktestGame = (replayGame: ApiFootballReplayGame): Game | undefined => {

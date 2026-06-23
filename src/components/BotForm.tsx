@@ -1,6 +1,14 @@
 import { FormEvent, useState } from 'react';
 import { ArrowLeftRight, Plus, Save, X } from 'lucide-react';
 import { Bot, BotMode, BotRule, BotRuleConnector, BotRuleOperator } from '../types';
+import {
+  ParameterOption,
+  getParameterOption,
+  getParameterOptions,
+  groupParameterOptions,
+  liveParameters,
+  preLiveParameters,
+} from '../services/parameterCatalog';
 import { uid } from '../utils/formatters';
 import { Button } from './Button';
 import { Card } from './Card';
@@ -11,54 +19,6 @@ type BotFormProps = {
   defaultStake: number;
   onSave: (bot: Bot) => void;
 };
-
-type ParameterOption = {
-  value: string;
-  label: string;
-  valueType?: 'text' | 'number';
-  min?: number;
-  max?: number;
-  step?: number;
-  defaultFrom?: number | string;
-  defaultTo?: number | string;
-};
-
-const liveParameters: ParameterOption[] = [
-  { value: 'minute', label: 'Tempo (min.)', min: 0, max: 150, defaultFrom: 0, defaultTo: 150 },
-  { value: 'score', label: 'Placar', valueType: 'text', defaultFrom: '0-0' },
-  { value: 'goals', label: 'Gols - Total', min: 0, max: 15, defaultFrom: 0, defaultTo: 15 },
-  { value: 'corners', label: 'Escanteios - Total', min: 0, max: 30, defaultFrom: 0, defaultTo: 12 },
-  { value: 'possession', label: 'Posse de bola (%)', min: 0, max: 100, defaultFrom: 45, defaultTo: 100 },
-  { value: 'shots', label: 'Finalizacoes - Total', min: 0, max: 40, defaultFrom: 0, defaultTo: 15 },
-  { value: 'shotsOnTarget', label: 'Finalizacoes no alvo - Total', min: 0, max: 20, defaultFrom: 0, defaultTo: 5 },
-  { value: 'attacks', label: 'Ataques - Total', min: 0, max: 200, defaultFrom: 0, defaultTo: 100 },
-  { value: 'dangerousAttacks', label: 'Ataques perigosos - Total', min: 0, max: 120, defaultFrom: 0, defaultTo: 40 },
-  { value: 'cards', label: 'Cartoes - Total', min: 0, max: 15, defaultFrom: 0, defaultTo: 6 },
-  { value: 'substitutions', label: 'Substituicoes', min: 0, max: 12, defaultFrom: 0, defaultTo: 6 },
-  { value: 'offensivePressure', label: 'Pressao ofensiva', min: 0, max: 100, defaultFrom: 0, defaultTo: 70 },
-  { value: 'recentEvents', label: 'Eventos recentes', valueType: 'text', defaultFrom: 'finalizacao' },
-  { value: 'liveOdds', label: 'Odds live', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
-  { value: 'statDifference', label: 'Diferenca estatistica entre equipes', min: 0, max: 100, defaultFrom: 0, defaultTo: 30 },
-];
-
-const preLiveParameters: ParameterOption[] = [
-  { value: 'championship', label: 'Campeonato', valueType: 'text' },
-  { value: 'season', label: 'Temporada', valueType: 'text' },
-  { value: 'homeTeam', label: 'Time mandante', valueType: 'text' },
-  { value: 'awayTeam', label: 'Time visitante', valueType: 'text' },
-  { value: 'tablePosition', label: 'Posicao na tabela', min: 1, max: 30, defaultFrom: 1, defaultTo: 12 },
-  { value: 'performance', label: 'Aproveitamento (%)', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
-  { value: 'averageGoals', label: 'Media de gols', min: 0, max: 6, step: 0.1, defaultFrom: 1.5, defaultTo: 4 },
-  { value: 'averageCorners', label: 'Media de escanteios', min: 0, max: 20, step: 0.1, defaultFrom: 6, defaultTo: 14 },
-  { value: 'averageCards', label: 'Media de cartoes', min: 0, max: 12, step: 0.1, defaultFrom: 0, defaultTo: 6 },
-  { value: 'winningStreak', label: 'Sequencia de vitorias', min: 0, max: 15, defaultFrom: 0, defaultTo: 5 },
-  { value: 'losingStreak', label: 'Sequencia de derrotas', min: 0, max: 15, defaultFrom: 0, defaultTo: 3 },
-  { value: 'headToHead', label: 'Confronto direto', min: 0, max: 10, step: 0.1, defaultFrom: 0, defaultTo: 4 },
-  { value: 'offensiveStrength', label: 'Forca ofensiva', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
-  { value: 'defensiveStrength', label: 'Forca defensiva', min: 0, max: 100, defaultFrom: 40, defaultTo: 100 },
-  { value: 'favoritism', label: 'Favoritismo (%)', min: 0, max: 100, defaultFrom: 50, defaultTo: 100 },
-  { value: 'preLiveOdds', label: 'Odds pre-live', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
-];
 
 const gameSituationParameters: ParameterOption[] = [
   { value: '', label: '-', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
@@ -78,6 +38,7 @@ const gameSituationRoleOptions = [
 
 const goalLines = ['0.5', '1.5', '2.5', '3.5', '4.5', '5.5'];
 const goalMarkets = goalLines.flatMap((line) => [`Over ${line}`, `Under ${line}`]);
+const firstHalfGoalLines = ['0.5', '1.5', '2.5', '3.5'];
 
 const oddMarkets = [
   '',
@@ -85,6 +46,7 @@ const oddMarkets = [
   'Odd - Empate',
   'Odd - Fora',
   ...goalLines.flatMap((line) => [`Odd - Over Gol (+ ${line}G)`, `Odd - Under Gol (+ ${line}G)`]),
+  ...firstHalfGoalLines.flatMap((line) => [`Odd - Over ${line} HT`, `Odd - Under ${line} HT`]),
   'Odd - BTTS Sim',
   'Odd - BTTS Nao',
   'Odd - Dupla chance Favorito-Underdog',
@@ -125,11 +87,6 @@ const connectors: BotRuleConnector[] = ['AND', 'OR', 'NOT'];
 const numericOperators: BotRuleOperator[] = ['between', '>=', '<=', '=', '!='];
 const textOperators: BotRuleOperator[] = ['=', '!='];
 const gameSituationRuleParameters = ['favoriteSide', ...gameSituationParameters.map((parameter) => parameter.value).filter(Boolean)];
-
-const getParameterOptions = (mode: BotMode) => (mode === 'live' ? liveParameters : preLiveParameters);
-
-const getParameterOption = (mode: BotMode, parameter: string) =>
-  getParameterOptions(mode).find((option) => option.value === parameter);
 
 const isGameSituationRule = (rule: BotRule) => gameSituationRuleParameters.includes(rule.parameter);
 
@@ -327,10 +284,14 @@ function RangeRuleCard({
             className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
           >
             <option value="">Selecione</option>
-            {options.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
+            {groupParameterOptions(options).map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </label>
@@ -546,10 +507,14 @@ function PreLiveRuleCard({
                 </option>
               ))
             ) : (
-              dataOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
+              groupParameterOptions(dataOptions).map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))
             )}
           </select>

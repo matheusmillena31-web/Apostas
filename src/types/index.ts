@@ -5,21 +5,47 @@ export type GameStatus = 'ao-vivo' | 'historico' | 'agendado';
 export type BotRuleOperator = '>=' | '<=' | '=' | '!=' | 'between';
 export type BotRuleConnector = 'AND' | 'OR' | 'NOT';
 
+export type TeamReference = 'home' | 'away' | 'favorite' | 'underdog';
+
+export interface TeamLiveStats {
+  shots?: number;
+  shotsOnTarget?: number;
+  dangerousAttacks?: number;
+  attacks?: number;
+  corners?: number;
+  possession?: number;
+  cards?: number;
+  yellowCards?: number;
+  redCards?: number;
+}
+
+export interface HistoricalOdd {
+  marketName: string;
+  value: string;
+  odd: number;
+  handicap?: string | null;
+}
+
 export interface LiveStats {
   shots: number;
   shotsOnTarget: number;
   dangerousAttacks: number;
+  attacks?: number;
   corners: number;
   possession: number;
   cards: number;
   offensivePressure: number;
   recentShots: number;
+  home?: TeamLiveStats;
+  away?: TeamLiveStats;
 }
 
 export interface GameSnapshot {
   minute: number;
   scoreHome: number;
   scoreAway: number;
+  halfTimeScoreHome?: number | null;
+  halfTimeScoreAway?: number | null;
   homeOdd: number;
   drawOdd: number;
   awayOdd: number;
@@ -29,6 +55,7 @@ export interface GameSnapshot {
   bttsOdd: number;
   stats: LiveStats;
   events: string[];
+  odds?: HistoricalOdd[];
 }
 
 export interface Game {
