@@ -67,10 +67,29 @@ const toNumber = (value: unknown) => {
   return null;
 };
 
+const getFavoriteGameSituationValues = (game: Game, snapshot: GameSnapshot) => {
+  const homeIsFavorite = game.preLive.homeOdd <= game.preLive.awayOdd;
+  const favoriteScore = homeIsFavorite ? snapshot.scoreHome : snapshot.scoreAway;
+  const underdogScore = homeIsFavorite ? snapshot.scoreAway : snapshot.scoreHome;
+  const diff = Math.abs(snapshot.scoreHome - snapshot.scoreAway);
+  const favoriteDiff = Math.abs(favoriteScore - underdogScore);
+
+  return {
+    favoriteSide: homeIsFavorite ? 'homeFavorite' : 'awayFavorite',
+    gameDraw: snapshot.scoreHome === snapshot.scoreAway ? 0 : undefined,
+    favoriteWinningGoalDiff: favoriteScore > underdogScore ? favoriteDiff : undefined,
+    favoriteNotLosingGoalDiff: favoriteScore >= underdogScore ? favoriteDiff : undefined,
+    underdogWinningGoalDiff: underdogScore > favoriteScore ? favoriteDiff : undefined,
+    underdogNotLosingGoalDiff: underdogScore >= favoriteScore ? favoriteDiff : undefined,
+    anyTeamWinningGoalDiff: diff > 0 ? diff : undefined,
+  };
+};
+
 const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapshot, odd: number): unknown => {
   const stats = snapshot.stats;
 
   if (rule.mode === 'live') {
+    const gameSituationValues = getFavoriteGameSituationValues(game, snapshot);
     const liveValues: Record<string, unknown> = {
       minute: snapshot.minute,
       score: `${snapshot.scoreHome}-${snapshot.scoreAway}`,
@@ -87,6 +106,7 @@ const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapsho
       recentEvents: snapshot.events.join(' '),
       liveOdds: odd,
       statDifference: Math.abs(stats.shots - stats.shotsOnTarget),
+      ...gameSituationValues,
     };
 
     return liveValues[rule.parameter];
@@ -115,6 +135,7 @@ const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapsho
 };
 
 const compareRule = (actual: unknown, rule: BotRule) => {
+  if (rule.parameter === 'favoriteSide' && rule.value === 'any') return true;
   if (actual === undefined || actual === null) return false;
 
   if (rule.operator === '=' || rule.operator === '!=') {
@@ -169,7 +190,7 @@ const evaluateRuleList = (rules: BotRule[], bot: Bot, game: Game, snapshot: Game
 };
 
 const evaluateDynamicRules = (bot: Bot, game: Game, snapshot: GameSnapshot, odd: number) => {
-  const rules = bot.rules.filter((rule) => rule.mode === bot.mode && rule.parameter);
+  const rules = bot.rules.filter((rule) => rule.parameter && (bot.mode === 'live' || rule.mode === bot.mode));
   if (rules.length === 0) return { passed: true, reason: 'Sem parâmetros obrigatórios' };
   return evaluateRuleList(rules, bot, game, snapshot, odd);
 };

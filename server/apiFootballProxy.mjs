@@ -38,6 +38,7 @@ const collectorIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_INTERVAL_M
 const collectorMaxFixtures = Number(process.env.API_FOOTBALL_COLLECTOR_MAX_FIXTURES ?? 2);
 const collectorRequestDelayMs = Number(process.env.API_FOOTBALL_COLLECTOR_REQUEST_DELAY_MS ?? 1200);
 const collectorDailyRequestLimit = Number(process.env.API_FOOTBALL_COLLECTOR_DAILY_REQUEST_LIMIT ?? 7200);
+const collectorHalftimeIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_HALFTIME_INTERVAL_MS ?? 240000);
 const collectorStatsEnabled = process.env.API_FOOTBALL_COLLECTOR_STATS_ENABLED !== 'false';
 const collectorEventsEnabled = process.env.API_FOOTBALL_COLLECTOR_EVENTS_ENABLED !== 'false';
 const collectorOddsEnabled = process.env.API_FOOTBALL_COLLECTOR_ODDS_ENABLED !== 'false';
@@ -48,6 +49,7 @@ const collectorState = {
   maxFixtures: collectorMaxFixtures,
   requestDelayMs: collectorRequestDelayMs,
   dailyRequestLimit: collectorDailyRequestLimit,
+  halftimeIntervalMs: collectorHalftimeIntervalMs,
   requestDay: new Date().toISOString().slice(0, 10),
   requestsUsedToday: 0,
   requestsSkippedToday: 0,
@@ -61,6 +63,8 @@ const collectorState = {
   totalRuns: 0,
   totalSnapshotsSaved: 0,
 };
+
+const lastHalftimeSnapshotByFixture = new Map();
 
 const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
 
@@ -166,6 +170,29 @@ const readRawSnapshots = async () => {
 };
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const isHalftimeFixture = (fixture) => fixture?.fixture?.status?.short === 'HT';
+
+const isPlayingFixture = (fixture) => ['1H', '2H'].includes(fixture?.fixture?.status?.short);
+
+const shouldCaptureFixtureNow = (fixture, now = Date.now()) => {
+  const fixtureId = fixture?.fixture?.id;
+  if (!fixtureId) return false;
+  if (isPlayingFixture(fixture)) {
+    lastHalftimeSnapshotByFixture.delete(fixtureId);
+    return true;
+  }
+  if (!isHalftimeFixture(fixture)) return true;
+
+  const lastCapturedAt = lastHalftimeSnapshotByFixture.get(fixtureId) ?? 0;
+  if (now - lastCapturedAt < collectorHalftimeIntervalMs) return false;
+
+  lastHalftimeSnapshotByFixture.set(fixtureId, now);
+  return true;
+};
+
+const filterFixturesForSnapshot = (fixtures, now = Date.now()) =>
+  fixtures.filter((fixture) => shouldCaptureFixtureNow(fixture, now));
 
 const getSnapshotFixtureId = (snapshot) => {
   const queryFixture = Number(snapshot?.query?.fixture);
@@ -504,15 +531,29 @@ const runCollector = async ({ reason = 'scheduled' } = {}) => {
   let fixtures = [];
 
   try {
-    const live = await collectEndpoint(
+    const live = await callApiFootball(
       '/fixtures',
       { live: 'all', timezone: 'America/Sao_Paulo' },
-      'fixtures-live',
+      { useCollectorBudget: true },
     );
-    snapshotsSaved += live.saved ? 1 : 0;
     fixtures = Array.isArray(live.payload?.response) ? live.payload.response : [];
+    const fixturesToSnapshot = filterFixturesForSnapshot(fixtures);
 
-    const fixturesToCollect = selectFixturesForCollector(fixtures);
+    if (fixturesToSnapshot.length > 0 || fixtures.length === 0) {
+      const saved = await persistSnapshot({
+        kind: 'fixtures-live',
+        apiPath: '/fixtures',
+        query: live.query,
+        payload: {
+          ...live.payload,
+          response: fixturesToSnapshot,
+          results: fixturesToSnapshot.length,
+        },
+      });
+      snapshotsSaved += saved ? 1 : 0;
+    }
+
+    const fixturesToCollect = selectFixturesForCollector(fixturesToSnapshot);
 
     let rateLimited = false;
 
@@ -550,7 +591,9 @@ const runCollector = async ({ reason = 'scheduled' } = {}) => {
       reason,
       fixturesFound: fixtures.length,
       fixturesCollected: fixturesToCollect.length,
+      fixturesSnapshotted: fixturesToSnapshot.length,
       snapshotsSaved,
+      halftimeIntervalMs: collectorHalftimeIntervalMs,
       requestsUsedToday: collectorState.requestsUsedToday,
       dailyRequestLimit: collectorDailyRequestLimit,
       errors,
@@ -563,7 +606,9 @@ const runCollector = async ({ reason = 'scheduled' } = {}) => {
       reason,
       fixturesFound: fixtures.length,
       fixturesCollected: 0,
+      fixturesSnapshotted: 0,
       snapshotsSaved,
+      halftimeIntervalMs: collectorHalftimeIntervalMs,
       requestsUsedToday: collectorState.requestsUsedToday,
       dailyRequestLimit: collectorDailyRequestLimit,
       errors: [collectorState.lastError],

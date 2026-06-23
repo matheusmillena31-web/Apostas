@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { ArrowLeftRight, Plus, Save, X } from 'lucide-react';
-import { Bot, BotMode, BotRule, BotRuleConnector, BotRuleOperator, TradeSide } from '../types';
+import { Bot, BotMode, BotRule, BotRuleConnector, BotRuleOperator } from '../types';
 import { uid } from '../utils/formatters';
 import { Button } from './Button';
 import { Card } from './Card';
@@ -60,6 +60,22 @@ const preLiveParameters: ParameterOption[] = [
   { value: 'preLiveOdds', label: 'Odds pre-live', min: 1.01, max: 50, step: 0.01, defaultFrom: 1.5, defaultTo: 20 },
 ];
 
+const gameSituationParameters: ParameterOption[] = [
+  { value: '', label: '-', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
+  { value: 'gameDraw', label: 'Empate', min: 0, max: 0, defaultFrom: 0, defaultTo: 0 },
+  { value: 'favoriteWinningGoalDiff', label: 'Favorito vencendo - dif. gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
+  { value: 'favoriteNotLosingGoalDiff', label: 'Favorito empatando ou vencendo - dif. gols', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
+  { value: 'underdogWinningGoalDiff', label: 'Underdog vencendo - dif. gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
+  { value: 'underdogNotLosingGoalDiff', label: 'Underdog empatando ou vencendo - dif. gols', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
+  { value: 'anyTeamWinningGoalDiff', label: 'Qualquer vencendo - dif. gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
+];
+
+const gameSituationRoleOptions = [
+  { value: 'any', label: 'Casa é favorito ou underdog' },
+  { value: 'homeFavorite', label: 'Casa é favorito' },
+  { value: 'awayFavorite', label: 'Visitante é favorito' },
+];
+
 const goalLines = ['0.5', '1.5', '2.5', '3.5', '4.5', '5.5'];
 const goalMarkets = goalLines.flatMap((line) => [`Over ${line}`, `Under ${line}`]);
 
@@ -108,11 +124,17 @@ const mainLeagues = [
 const connectors: BotRuleConnector[] = ['AND', 'OR', 'NOT'];
 const numericOperators: BotRuleOperator[] = ['between', '>=', '<=', '=', '!='];
 const textOperators: BotRuleOperator[] = ['=', '!='];
+const gameSituationRuleParameters = ['favoriteSide', ...gameSituationParameters.map((parameter) => parameter.value).filter(Boolean)];
 
 const getParameterOptions = (mode: BotMode) => (mode === 'live' ? liveParameters : preLiveParameters);
 
 const getParameterOption = (mode: BotMode, parameter: string) =>
   getParameterOptions(mode).find((option) => option.value === parameter);
+
+const isGameSituationRule = (rule: BotRule) => gameSituationRuleParameters.includes(rule.parameter);
+
+const getModeForRules = (rules: BotRule[]): BotMode =>
+  rules.some((rule) => rule.mode === 'live' && rule.parameter) ? 'live' : 'pre-live';
 
 const toOptionalNumber = (value: string) => {
   if (value.trim() === '') return undefined;
@@ -140,9 +162,35 @@ const createRule = (mode: BotMode, parameter = ''): BotRule => {
   };
 };
 
+const createPreLiveOddRule = (): BotRule => ({
+  ...createRule('pre-live', 'preLiveOdds'),
+  operator: '<=',
+  value: 1.8,
+  secondValue: undefined,
+});
+
+const createGameSituationRoleRule = (): BotRule => ({
+  id: uid('rule'),
+  mode: 'live',
+  parameter: 'favoriteSide',
+  operator: '=',
+  value: 'any',
+  connector: 'AND',
+});
+
+const createGameSituationMetricRule = (): BotRule => ({
+  id: uid('rule'),
+  mode: 'live',
+  parameter: 'favoriteWinningGoalDiff',
+  operator: 'between',
+  value: 1,
+  secondValue: 20,
+  connector: 'AND',
+});
+
 const createCashOutRule = (mode: BotMode): BotRule => createRule(mode, mode === 'live' ? 'liveOdds' : 'preLiveOdds');
 
-export function createDefaultBot(defaultStake: number): Bot {
+export function createDefaultBot(_defaultStake: number): Bot {
   const now = new Date().toISOString();
 
   return {
@@ -154,10 +202,10 @@ export function createDefaultBot(defaultStake: number): Bot {
     sport: 'Futebol',
     market: '',
     oddMarket: undefined,
-    operation: undefined,
+    operation: 'BACK',
     minOdd: undefined,
     maxOdd: undefined,
-    stake: defaultStake,
+    stake: 1,
     rules: [createRule('live', 'minute')],
     includedLeagues: [],
     excludedLeagues: [],
@@ -203,14 +251,14 @@ function RangeRuleCard({
   index,
   onSwitchMode,
   onRemove,
-  onChange,
+  onPatch,
 }: {
   rule: BotRule;
   mode: BotMode;
   index: number;
   onSwitchMode?: () => void;
   onRemove: () => void;
-  onChange: <TKey extends keyof BotRule>(field: TKey, value: BotRule[TKey]) => void;
+  onPatch: (patch: Partial<BotRule>) => void;
 }) {
   const options = getParameterOptions(mode);
   const selectedOption = getParameterOption(mode, rule.parameter);
@@ -225,10 +273,12 @@ function RangeRuleCard({
 
   const updateParameter = (parameter: string) => {
     const option = getParameterOption(mode, parameter);
-    onChange('parameter', parameter);
-    onChange('operator', option?.valueType === 'text' ? '=' : 'between');
-    onChange('value', option?.defaultFrom ?? '');
-    onChange('secondValue', option?.valueType === 'text' ? undefined : (option?.defaultTo ?? ''));
+    onPatch({
+      parameter,
+      operator: option?.valueType === 'text' ? '=' : 'between',
+      value: option?.defaultFrom ?? '',
+      secondValue: option?.valueType === 'text' ? undefined : (option?.defaultTo ?? ''),
+    });
   };
 
   return (
@@ -259,7 +309,7 @@ function RangeRuleCard({
             <span className="mb-2 block text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Combinar</span>
             <select
               value={rule.connector ?? 'AND'}
-              onChange={(event) => onChange('connector', event.target.value as BotRuleConnector)}
+              onChange={(event) => onPatch({ connector: event.target.value as BotRuleConnector })}
               className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
             >
               {connectors.map((connector) => (
@@ -289,7 +339,7 @@ function RangeRuleCard({
           <span className="mb-2 block text-sm font-medium text-slate-300">Operador</span>
           <select
             value={rule.operator}
-            onChange={(event) => onChange('operator', event.target.value as BotRuleOperator)}
+            onChange={(event) => onPatch({ operator: event.target.value as BotRuleOperator })}
             className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
           >
             {operatorOptions.map((operator) => (
@@ -307,7 +357,7 @@ function RangeRuleCard({
             <span className="mb-2 block text-sm font-medium text-slate-300">Valor</span>
             <input
               value={from}
-              onChange={(event) => onChange('value', event.target.value)}
+              onChange={(event) => onPatch({ value: event.target.value })}
               className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
             />
           </label>
@@ -323,7 +373,7 @@ function RangeRuleCard({
                 max={max}
                 step={step}
                 value={from}
-                onChange={(event) => onChange('value', valueForOption(event.target.value, selectedOption))}
+                onChange={(event) => onPatch({ value: valueForOption(event.target.value, selectedOption) })}
                 className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
               />
             </label>
@@ -338,7 +388,7 @@ function RangeRuleCard({
                     max={max}
                     step={step}
                     value={to}
-                    onChange={(event) => onChange('secondValue', valueForOption(event.target.value, selectedOption))}
+                    onChange={(event) => onPatch({ secondValue: valueForOption(event.target.value, selectedOption) })}
                     className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
                   />
                 </label>
@@ -349,6 +399,175 @@ function RangeRuleCard({
           {showSecondValue && <RangeLine min={min} max={max} from={from} to={to} />}
         </div>
       )}
+    </div>
+  );
+}
+
+function PreLiveRuleCard({
+  rule,
+  index,
+  oddMarket,
+  onSwitchMode,
+  onRemove,
+  onPatch,
+  onOddMarketChange,
+}: {
+  rule: BotRule;
+  index: number;
+  oddMarket?: string;
+  onSwitchMode?: () => void;
+  onRemove: () => void;
+  onPatch: (patch: Partial<BotRule>) => void;
+  onOddMarketChange: (oddMarket?: string) => void;
+}) {
+  const isOddsRule = rule.parameter === 'preLiveOdds';
+  const dataOptions = preLiveParameters.filter((option) => option.value !== 'preLiveOdds');
+  const selectedDataOption = getParameterOption('pre-live', rule.parameter);
+  const selectedOption: ParameterOption | undefined = isOddsRule
+    ? { value: 'preLiveOdds', label: 'Odds pre-live', min: 1.01, max: 200, step: 0.01, defaultFrom: 1.8 }
+    : selectedDataOption;
+  const isText = !isOddsRule && selectedOption?.valueType === 'text';
+  const operatorOptions = isText ? textOperators : (['<=', '>=', '=', '!='] as BotRuleOperator[]);
+  const parameterValue = isOddsRule ? (oddMarket ?? '') : rule.parameter;
+
+  const changeType = (type: 'odds' | 'data') => {
+    if (type === 'odds') {
+      onOddMarketChange(oddMarket || oddMarkets[1]);
+      onPatch({ parameter: 'preLiveOdds', operator: '<=', value: 1.8, secondValue: undefined });
+      return;
+    }
+
+    const option = getParameterOption('pre-live', 'averageGoals');
+    onPatch({ parameter: 'averageGoals', operator: '<=', value: option?.defaultFrom ?? '', secondValue: undefined });
+  };
+
+  const changeParameter = (parameter: string) => {
+    if (isOddsRule) {
+      onOddMarketChange(parameter || undefined);
+      onPatch({ parameter: 'preLiveOdds', operator: '<=', value: rule.value || 1.8, secondValue: undefined });
+      return;
+    }
+
+    const option = getParameterOption('pre-live', parameter);
+    onPatch({
+      parameter,
+      operator: option?.valueType === 'text' ? '=' : '<=',
+      value: option?.defaultFrom ?? '',
+      secondValue: undefined,
+    });
+  };
+
+  const conditionLabel = (operator: BotRuleOperator) => {
+    if (operator === '<=') return 'menor que';
+    if (operator === '>=') return 'maior que';
+    if (operator === '=') return 'igual a';
+    if (operator === '!=') return 'diferente de';
+    return 'entre';
+  };
+
+  return (
+    <div className="relative rounded-lg border border-amber-400/90 bg-ink-900/95 px-5 py-7 text-slate-100 shadow-glow">
+      <button
+        type="button"
+        onClick={onRemove}
+        className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-red-500 text-white transition hover:bg-red-400"
+        title="Remover bloco"
+      >
+        <X className="h-5 w-5" />
+      </button>
+
+      <div className="mx-auto flex max-w-2xl justify-center pr-10">
+        {onSwitchMode && (
+          <button
+            type="button"
+            onClick={onSwitchMode}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-amber-300 hover:text-white"
+          >
+            <ArrowLeftRight className="h-4 w-4" />
+            Mudar para live
+          </button>
+        )}
+      </div>
+
+      <div className="mx-auto mt-16 grid max-w-5xl gap-7 lg:grid-cols-2">
+        {index > 0 && (
+          <label className="lg:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-300">Combinar</span>
+            <select
+              value={rule.connector ?? 'AND'}
+              onChange={(event) => onPatch({ connector: event.target.value as BotRuleConnector })}
+              className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+            >
+              {connectors.map((connector) => (
+                <option key={connector}>{connector}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <label>
+          <span className="mb-2 block text-sm font-medium text-slate-300">Tipo</span>
+          <select
+            value={isOddsRule ? 'odds' : 'data'}
+            onChange={(event) => changeType(event.target.value as 'odds' | 'data')}
+            className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+          >
+            <option value="odds">Odds pre-live</option>
+            <option value="data">Dados pre-live</option>
+          </select>
+        </label>
+
+        <label>
+          <span className="mb-2 block text-sm font-medium text-slate-300">Condicao</span>
+          <select
+            value={rule.operator}
+            onChange={(event) => onPatch({ operator: event.target.value as BotRuleOperator, secondValue: undefined })}
+            className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+          >
+            {operatorOptions.map((operator) => (
+              <option key={operator} value={operator}>
+                {conditionLabel(operator)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span className="mb-2 block text-sm font-medium text-slate-300">Parametro</span>
+          <select
+            value={parameterValue}
+            onChange={(event) => changeParameter(event.target.value)}
+            className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+          >
+            {isOddsRule ? (
+              oddMarkets.map((market) => (
+                <option key={market} value={market}>
+                  {market || 'Selecione uma odd'}
+                </option>
+              ))
+            ) : (
+              dataOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+
+        <label>
+          <span className="mb-2 block text-sm font-medium text-slate-300">Valor</span>
+          <input
+            type={isText ? 'text' : 'number'}
+            min={selectedOption?.min}
+            max={selectedOption?.max}
+            step={selectedOption?.step ?? 1}
+            value={String(rule.value ?? '')}
+            onChange={(event) => onPatch({ value: valueForOption(event.target.value, selectedOption) })}
+            className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+          />
+        </label>
+      </div>
     </div>
   );
 }
@@ -372,7 +591,7 @@ function OddRangeCard({
   const to = maxOdd === undefined ? '' : String(maxOdd);
 
   return (
-    <div className="relative rounded-lg border border-violet-500/80 bg-ink-900/95 p-5 text-slate-100 shadow-glow">
+    <div className="relative rounded-lg border border-violet-500/80 bg-ink-900/95 px-5 py-7 text-slate-100 shadow-glow">
       <button
         type="button"
         onClick={onClear}
@@ -382,9 +601,9 @@ function OddRangeCard({
         <X className="h-5 w-5" />
       </button>
 
-      <div className="mx-auto max-w-2xl pr-10">
+      <div className="mx-auto max-w-md pr-10">
         <label>
-          <span className="mb-2 block text-sm font-medium text-slate-300">Parametro de odd {mode === 'live' ? 'live' : 'pre-live'}</span>
+          <span className="mb-2 block text-sm font-medium text-slate-300">Parametro</span>
           <select
             value={oddMarket ?? ''}
             onChange={(event) => onChange({ oddMarket: event.target.value || undefined, minOdd, maxOdd })}
@@ -399,13 +618,13 @@ function OddRangeCard({
         </label>
       </div>
 
-      <div className="mt-5 grid items-end gap-5 md:grid-cols-[1fr_auto_1fr]">
+      <div className="mt-7 grid items-end gap-5 md:grid-cols-[1fr_auto_1fr]">
         <label>
-          <span className="mb-2 block text-sm font-medium text-slate-300">Odd minima de entrada</span>
+          <span className="mb-2 block text-sm font-medium text-slate-300">De</span>
           <input
             type="number"
             min={1.01}
-            max={50}
+            max={200}
             step={0.01}
             value={from}
             onChange={(event) => onChange({ oddMarket, minOdd: toOptionalNumber(event.target.value), maxOdd })}
@@ -414,11 +633,11 @@ function OddRangeCard({
         </label>
         <span className="pb-2 text-xl text-slate-500">-&gt;</span>
         <label>
-          <span className="mb-2 block text-sm font-medium text-slate-300">Odd maxima de entrada</span>
+          <span className="mb-2 block text-sm font-medium text-slate-300">Ate</span>
           <input
             type="number"
             min={1.01}
-            max={50}
+            max={200}
             step={0.01}
             value={to}
             onChange={(event) => onChange({ oddMarket, minOdd, maxOdd: toOptionalNumber(event.target.value) })}
@@ -427,7 +646,134 @@ function OddRangeCard({
         </label>
       </div>
 
-      <RangeLine min={1.01} max={50} from={from || '1.5'} to={to || '20'} />
+      <RangeLine min={1} max={200} from={from || '1'} to={to || '200'} />
+    </div>
+  );
+}
+
+function GameSituationCard({
+  roleRule,
+  metricRule,
+  onEnable,
+  onClear,
+  onPatchRole,
+  onPatchMetric,
+}: {
+  roleRule?: BotRule;
+  metricRule?: BotRule;
+  onEnable: () => void;
+  onClear: () => void;
+  onPatchRole: (patch: Partial<BotRule>) => void;
+  onPatchMetric: (patch: Partial<BotRule>) => void;
+}) {
+  const enabled = Boolean(roleRule && metricRule);
+  const selectedOption = gameSituationParameters.find((option) => option.value === metricRule?.parameter) ?? gameSituationParameters[2];
+  const from = String(metricRule?.value ?? selectedOption.defaultFrom ?? '');
+  const to = String(metricRule?.secondValue ?? selectedOption.defaultTo ?? '');
+  const min = selectedOption.min ?? 0;
+  const max = selectedOption.max ?? 20;
+  const step = selectedOption.step ?? 1;
+
+  const updateParameter = (parameter: string) => {
+    if (!parameter) {
+      onClear();
+      return;
+    }
+
+    const option = gameSituationParameters.find((item) => item.value === parameter) ?? gameSituationParameters[2];
+    onPatchMetric({
+      parameter,
+      operator: 'between',
+      value: option.defaultFrom ?? '',
+      secondValue: option.defaultTo ?? '',
+    });
+  };
+
+  if (!enabled) {
+    return (
+      <div className="rounded-lg border border-violet-500/80 bg-ink-900/95 p-5 text-slate-100 shadow-glow">
+        <button
+          type="button"
+          onClick={onEnable}
+          className="mx-auto flex h-20 w-full max-w-sm items-center justify-center rounded-lg border border-white/10 bg-ink-950 text-green-400 shadow-glow transition hover:border-green-500/70 hover:bg-green-500/10"
+        >
+          <Plus className="h-10 w-10" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative rounded-lg border border-violet-500/80 bg-ink-900/95 px-5 py-7 text-slate-100 shadow-glow">
+      <button
+        type="button"
+        onClick={onClear}
+        className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-red-500 text-white transition hover:bg-red-400"
+        title="Remover situacao de jogo"
+      >
+        <X className="h-5 w-5" />
+      </button>
+
+      <div className="mx-auto flex max-w-xl flex-col gap-4 pr-10">
+        {gameSituationRoleOptions.map((option) => (
+          <label key={option.value} className="flex items-center justify-center gap-4 text-sm font-semibold text-white">
+            <input
+              type="radio"
+              name="favoriteSide"
+              value={option.value}
+              checked={(roleRule?.value ?? 'any') === option.value}
+              onChange={(event) => onPatchRole({ value: event.target.value })}
+              className="h-5 w-5 accent-violet-600"
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+
+        <label className="mt-2">
+          <span className="mb-2 block text-sm font-medium text-slate-300">Parametro</span>
+          <select
+            value={metricRule?.parameter ?? ''}
+            onChange={(event) => updateParameter(event.target.value)}
+            className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
+          >
+            {gameSituationParameters.map((parameter) => (
+              <option key={parameter.value} value={parameter.value}>
+                {parameter.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="mt-7 grid items-end gap-5 md:grid-cols-[1fr_auto_1fr]">
+        <label>
+          <span className="mb-2 block text-sm font-medium text-slate-300">De</span>
+          <input
+            type="number"
+            min={min}
+            max={max}
+            step={step}
+            value={from}
+            onChange={(event) => onPatchMetric({ value: valueForOption(event.target.value, selectedOption) })}
+            className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
+          />
+        </label>
+        <span className="pb-2 text-xl text-slate-500">-&gt;</span>
+        <label>
+          <span className="mb-2 block text-sm font-medium text-slate-300">Ate</span>
+          <input
+            type="number"
+            min={min}
+            max={max}
+            step={step}
+            value={to}
+            onChange={(event) => onPatchMetric({ secondValue: valueForOption(event.target.value, selectedOption) })}
+            className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
+          />
+        </label>
+      </div>
+
+      <RangeLine min={min} max={max} from={from} to={to} />
     </div>
   );
 }
@@ -505,47 +851,126 @@ function LeagueSelector({
 
 export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
   const defaultBot = createDefaultBot(defaultStake);
-  const [bot, setBot] = useState<Bot>(() => ({
-    ...(initialBot ?? defaultBot),
-    oddMarket: initialBot?.oddMarket ?? initialBot?.market,
-    cashOut: initialBot?.cashOut ?? defaultBot.cashOut,
-    includedLeagues: initialBot?.includedLeagues ?? [],
-    excludedLeagues: initialBot?.excludedLeagues ?? [],
-  }));
+  const [bot, setBot] = useState<Bot>(() => {
+    const rules = (initialBot?.rules ?? defaultBot.rules).map((rule) =>
+      rule.mode === 'pre-live' && rule.operator === 'between'
+        ? { ...rule, operator: '<=' as BotRuleOperator, secondValue: undefined }
+        : rule,
+    );
 
-  const activeRules = bot.rules.filter((rule) => rule.mode === bot.mode);
+    return {
+      ...(initialBot ?? defaultBot),
+      mode: getModeForRules(rules),
+      oddMarket: initialBot?.oddMarket ?? initialBot?.market,
+      operation: 'BACK',
+      stake: 1,
+      rules,
+      cashOut: initialBot?.cashOut ?? defaultBot.cashOut,
+      includedLeagues: initialBot?.includedLeagues ?? [],
+      excludedLeagues: initialBot?.excludedLeagues ?? [],
+    };
+  });
+
+  const activeRules = bot.rules.filter((rule) => (bot.mode === 'live' || rule.mode === bot.mode) && !isGameSituationRule(rule));
+  const gameSituationRoleRule = bot.rules.find((rule) => rule.parameter === 'favoriteSide');
+  const gameSituationMetricRule = bot.rules.find((rule) => rule.mode === 'live' && isGameSituationRule(rule) && rule.parameter !== 'favoriteSide');
 
   const updateBot = (patch: Partial<Bot>) => setBot((current) => ({ ...current, ...patch }));
 
   const changeMode = (nextMode: BotMode) => {
-    setBot((current) => ({
-      ...current,
-      mode: nextMode,
-      rules: current.rules.some((rule) => rule.mode === nextMode)
-        ? current.rules
-        : [...current.rules, createRule(nextMode, nextMode === 'live' ? 'minute' : 'averageGoals')],
-    }));
-  };
+    setBot((current) => {
+      if (nextMode === 'pre-live') {
+        const rules = current.rules
+          .filter((rule) => !isGameSituationRule(rule))
+          .map((rule) =>
+            rule.mode === 'live'
+              ? { ...createRule('pre-live', 'averageGoals'), id: rule.id, connector: rule.connector }
+              : rule,
+          );
 
-  const switchMode = () => changeMode(bot.mode === 'live' ? 'pre-live' : 'live');
+        return {
+          ...current,
+          oddMarket: current.oddMarket || oddMarkets[1],
+          market: current.market || current.oddMarket || oddMarkets[1],
+          mode: 'pre-live',
+          rules: rules.length ? rules : [createPreLiveOddRule()],
+        };
+      }
 
-  const updateRule = <TKey extends keyof BotRule>(ruleId: string, field: TKey, value: BotRule[TKey]) => {
-    updateBot({
-      rules: bot.rules.map((rule) => (rule.id === ruleId ? { ...rule, [field]: value } : rule)),
+      const hasLiveRule = current.rules.some((rule) => rule.mode === 'live' && !isGameSituationRule(rule));
+      return {
+        ...current,
+        mode: 'live',
+        rules: hasLiveRule ? current.rules : [...current.rules, createRule('live', 'minute')],
+      };
     });
   };
 
-  const addRule = () => updateBot({ rules: [...bot.rules, createRule(bot.mode)] });
+  const patchRule = (ruleId: string, patch: Partial<BotRule>) => {
+    const rules = bot.rules.map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule));
+    updateBot({ rules, mode: getModeForRules(rules) });
+  };
 
-  const removeRule = (ruleId: string) => updateBot({ rules: bot.rules.filter((rule) => rule.id !== ruleId) });
+  const switchRuleMode = (rule: BotRule) => {
+    const nextRule =
+      rule.mode === 'live'
+        ? { ...createRule('pre-live', 'averageGoals'), id: rule.id, connector: rule.connector }
+        : { ...createRule('live', 'minute'), id: rule.id, connector: rule.connector };
+    const rules = bot.rules.map((item) => (item.id === rule.id ? nextRule : item));
+    updateBot({
+      rules,
+      mode: getModeForRules(rules),
+      oddMarket: nextRule.mode === 'pre-live' ? (bot.oddMarket || oddMarkets[1]) : bot.oddMarket,
+      market: nextRule.mode === 'pre-live' ? (bot.market || bot.oddMarket || oddMarkets[1]) : bot.market,
+    });
+  };
 
-  const updateCashOutRule = <TKey extends keyof BotRule>(ruleId: string, field: TKey, value: BotRule[TKey]) => {
+  const addRule = () => {
+    const rule = bot.mode === 'pre-live' ? createPreLiveOddRule() : createRule('live', 'minute');
+    const rules = [...bot.rules, rule];
+    updateBot({ rules, mode: getModeForRules(rules) });
+  };
+
+  const removeRule = (ruleId: string) => {
+    const rules = bot.rules.filter((rule) => rule.id !== ruleId);
+    updateBot({ rules, mode: getModeForRules(rules) });
+  };
+
+  const enableGameSituation = () => {
+    const existingRole = bot.rules.some((rule) => rule.parameter === 'favoriteSide');
+    const existingMetric = bot.rules.some((rule) => rule.mode === 'live' && isGameSituationRule(rule) && rule.parameter !== 'favoriteSide');
+    const rules = [
+      ...bot.rules,
+      ...(existingRole ? [] : [createGameSituationRoleRule()]),
+      ...(existingMetric ? [] : [createGameSituationMetricRule()]),
+    ];
+    updateBot({ rules, mode: 'live' });
+  };
+
+  const clearGameSituation = () => {
+    const rules = bot.rules.filter((rule) => !isGameSituationRule(rule));
+    updateBot({ rules, mode: getModeForRules(rules) });
+  };
+
+  const patchGameSituationRole = (patch: Partial<BotRule>) => {
+    const rules = bot.rules.map((rule) => (rule.parameter === 'favoriteSide' ? { ...rule, ...patch } : rule));
+    updateBot({ rules, mode: 'live' });
+  };
+
+  const patchGameSituationMetric = (patch: Partial<BotRule>) => {
+    const rules = bot.rules.map((rule) =>
+      rule.mode === 'live' && isGameSituationRule(rule) && rule.parameter !== 'favoriteSide' ? { ...rule, ...patch } : rule,
+    );
+    updateBot({ rules, mode: 'live' });
+  };
+
+  const patchCashOutRule = (ruleId: string, patch: Partial<BotRule>) => {
     const cashOut = bot.cashOut ?? { enabled: false, exitRules: [] };
     const exitRules = cashOut.exitRules ?? [];
     updateBot({
       cashOut: {
         ...cashOut,
-        exitRules: exitRules.map((rule) => (rule.id === ruleId ? { ...rule, [field]: value } : rule)),
+        exitRules: exitRules.map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
       },
     });
   };
@@ -575,18 +1000,20 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const now = new Date().toISOString();
-    const market = String(form.get('market') ?? '').trim();
-    const operation = String(form.get('operation') ?? '').trim() as TradeSide | '';
+    const market = bot.market || bot.oddMarket;
+    const rules = bot.rules.filter((rule) => rule.parameter);
 
     onSave({
       ...bot,
       name: String(form.get('name') ?? '').trim() || 'Metodo sem nome',
       description: String(form.get('description') ?? ''),
-      isActive: form.get('isActive') === 'on',
+      isActive: true,
+      mode: getModeForRules(rules),
       market: market || undefined,
       oddMarket: bot.oddMarket || undefined,
-      operation: operation || undefined,
-      rules: bot.rules.filter((rule) => rule.parameter),
+      operation: 'BACK',
+      stake: 1,
+      rules,
       includedLeagues: bot.includedLeagues ?? [],
       excludedLeagues: bot.excludedLeagues ?? [],
       cashOut: {
@@ -602,16 +1029,10 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
-      <Card title="Identidade do metodo" subtitle="Defina nome, status e modo operacional.">
-        <div className="grid gap-4 lg:grid-cols-3">
+      <Card title="Identidade do metodo" subtitle="Defina nome e modo operacional. Bots salvos ficam ativos para simulacoes.">
+        <div className="grid gap-4 lg:grid-cols-2">
           <Field label="Nome">
             <Input name="name" value={bot.name} onChange={(event) => updateBot({ name: event.target.value })} placeholder="Ex: Over pressao 65+" required />
-          </Field>
-          <Field label="Status">
-            <div className="flex min-h-10 items-center gap-3 rounded-md border border-white/10 bg-ink-900 px-3">
-              <input name="isActive" type="checkbox" checked={bot.isActive} onChange={(event) => updateBot({ isActive: event.target.checked })} className="h-4 w-4 accent-electric-500" />
-              <span className="text-sm text-slate-300">Ativo para simulacoes</span>
-            </div>
           </Field>
           <Field label="Modo atual">
             <Select value={bot.mode} onChange={(event) => changeMode(event.target.value as BotMode)}>
@@ -619,7 +1040,7 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
               <option value="pre-live">Pre-live</option>
             </Select>
           </Field>
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-2">
             <Field label="Descricao">
               <Textarea name="description" value={bot.description ?? ''} onChange={(event) => updateBot({ description: event.target.value })} placeholder="Resumo do racional do metodo" />
             </Field>
@@ -630,10 +1051,9 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       <div className="flex justify-center">
         <label className="w-full max-w-sm">
           <span className="mb-2 block text-sm font-semibold text-slate-300">Classificar por:</span>
-          <Select defaultValue="favorito-underdog">
-            <option value="favorito-underdog">Favorito/Underdog</option>
+          <Select defaultValue="casa-fora">
             <option value="casa-fora">Casa/Fora</option>
-            <option value="mandante-visitante">Mandante/Visitante</option>
+            <option value="favorito-underdog">Favorito/Underdog</option>
           </Select>
         </label>
       </div>
@@ -641,15 +1061,28 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       <section className="space-y-5">
         <h2 className="text-xl font-semibold text-white">1o passo: escolha dos parametros gerais</h2>
         {activeRules.map((rule, index) => (
-          <RangeRuleCard
-            key={rule.id}
-            rule={rule}
-            mode={bot.mode}
-            index={index}
-            onSwitchMode={switchMode}
-            onRemove={() => removeRule(rule.id)}
-            onChange={(field, value) => updateRule(rule.id, field, value)}
-          />
+          rule.mode === 'pre-live' ? (
+            <PreLiveRuleCard
+              key={rule.id}
+              rule={rule}
+              index={index}
+              oddMarket={bot.oddMarket}
+              onSwitchMode={() => switchRuleMode(rule)}
+              onRemove={() => removeRule(rule.id)}
+              onPatch={(patch) => patchRule(rule.id, patch)}
+              onOddMarketChange={(oddMarket) => updateBot({ oddMarket })}
+            />
+          ) : (
+            <RangeRuleCard
+              key={rule.id}
+              rule={rule}
+              mode={rule.mode}
+              index={index}
+              onSwitchMode={() => switchRuleMode(rule)}
+              onRemove={() => removeRule(rule.id)}
+              onPatch={(patch) => patchRule(rule.id, patch)}
+            />
+          )
         ))}
         <button type="button" onClick={addRule} className="mx-auto flex h-24 w-full max-w-sm items-center justify-center rounded-lg border border-white/10 bg-ink-900 text-green-400 shadow-glow transition hover:border-green-500/70 hover:bg-green-500/10">
           <Plus className="h-12 w-12" />
@@ -660,40 +1093,14 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
         <h2 className="text-xl font-semibold text-white">
           2o passo: escolha um mercado (opcional) e filtre a odd {bot.mode === 'live' ? 'live' : 'pre-live'} (opcional)
         </h2>
-        <div className="rounded-lg border border-violet-500/80 bg-ink-850/95 p-5 shadow-glow">
-          <div className="mx-auto grid max-w-4xl gap-4 md:grid-cols-3">
-            <label>
-              <span className="mb-2 block text-sm font-medium text-slate-300">Mercado da aposta</span>
-              <select name="market" value={bot.market ?? ''} onChange={(event) => updateBot({ market: event.target.value || undefined })} className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500">
-                {markets.map((market) => (
-                  <option key={market} value={market}>{market || 'Sem mercado'}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span className="mb-2 block text-sm font-medium text-slate-300">BACK ou LAY</span>
-              <select name="operation" value={bot.operation ?? ''} onChange={(event) => updateBot({ operation: (event.target.value || undefined) as TradeSide | undefined })} className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500">
-                <option value="">Opcional</option>
-                <option value="BACK">BACK</option>
-                <option value="LAY">LAY</option>
-              </select>
-            </label>
-            <label>
-              <span className="mb-2 block text-sm font-medium text-slate-300">Stake</span>
-              <input type="number" step="0.01" value={bot.stake ?? ''} onChange={(event) => updateBot({ stake: toOptionalNumber(event.target.value) })} className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500" />
-            </label>
-          </div>
-          <div className="mt-5">
-            <OddRangeCard
-              mode={bot.mode}
-              oddMarket={bot.oddMarket}
-              minOdd={bot.minOdd}
-              maxOdd={bot.maxOdd}
-              onChange={(patch) => updateBot(patch)}
-              onClear={() => updateBot({ oddMarket: undefined, minOdd: undefined, maxOdd: undefined })}
-            />
-          </div>
-        </div>
+        <OddRangeCard
+          mode={bot.mode}
+          oddMarket={bot.oddMarket}
+          minOdd={bot.minOdd}
+          maxOdd={bot.maxOdd}
+          onChange={(patch) => updateBot({ ...patch, market: 'oddMarket' in patch ? patch.oddMarket : bot.market })}
+          onClear={() => updateBot({ market: undefined, oddMarket: undefined, minOdd: undefined, maxOdd: undefined })}
+        />
       </section>
 
       <section className="space-y-5">
@@ -713,7 +1120,19 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       </section>
 
       <section className="space-y-5">
-        <h2 className="text-xl font-semibold text-white">4o passo: cash-out (opcional)</h2>
+        <h2 className="text-xl font-semibold text-white">4o passo: situacao de jogo (opcional)</h2>
+        <GameSituationCard
+          roleRule={gameSituationRoleRule}
+          metricRule={gameSituationMetricRule}
+          onEnable={enableGameSituation}
+          onClear={clearGameSituation}
+          onPatchRole={patchGameSituationRole}
+          onPatchMetric={patchGameSituationMetric}
+        />
+      </section>
+
+      <section className="space-y-5">
+        <h2 className="text-xl font-semibold text-white">5o passo: cash-out (opcional)</h2>
         <div className="rounded-lg border border-violet-500/80 bg-ink-850/95 p-5 shadow-glow">
           <label className="flex items-center gap-3 text-sm font-semibold text-slate-300">
             <input
@@ -759,7 +1178,7 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
                 mode={bot.mode}
                 index={index}
                 onRemove={() => removeCashOutRule(rule.id)}
-                onChange={(field, value) => updateCashOutRule(rule.id, field, value)}
+                onPatch={(patch) => patchCashOutRule(rule.id, patch)}
               />
             ))}
             <button type="button" onClick={addCashOutRule} className="mx-auto flex h-20 w-full max-w-sm items-center justify-center rounded-lg border border-white/10 bg-ink-900 text-green-400 shadow-glow transition hover:border-green-500/70 hover:bg-green-500/10">

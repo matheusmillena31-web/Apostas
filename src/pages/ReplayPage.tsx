@@ -20,6 +20,27 @@ type ReplayPageProps = {
   delay: number;
 };
 
+type OddsSide = {
+  odd: string;
+  suspended?: boolean;
+};
+
+type OddsDisplaySelection = {
+  key: string;
+  label: string;
+  back?: OddsSide;
+  lay?: OddsSide;
+  suspended: boolean;
+};
+
+type OddsDisplayMarket = {
+  key: string;
+  title: string;
+  selections: OddsDisplaySelection[];
+  sortOrder: number;
+  line: number;
+};
+
 const formatScore = (home: number | null, away: number | null) =>
   home === null || away === null ? '-' : `${home} x ${away}`;
 
@@ -31,10 +52,17 @@ const formatReplayMinute = (snapshot?: ApiFootballReplaySnapshot) => {
   return `${snapshot.minute ?? 0}'${snapshot.extra ? `+${snapshot.extra}` : ''}`;
 };
 
+const isPlayingSnapshot = (snapshot: ApiFootballReplaySnapshot) => ['1H', '2H'].includes(snapshot.status?.short ?? '');
+
 const getOddsMarkets = (snapshot?: ApiFootballReplaySnapshot): ApiFootballOddsBet[] =>
   snapshot?.odds?.flatMap((item) => [...(item.odds ?? []), ...(item.bookmakers?.flatMap((bookmaker) => bookmaker.bets) ?? [])]) ?? [];
 
 const normalizeMarketName = (value: string) => value.trim().toLowerCase();
+
+const isFirstHalfMarket = (market: ApiFootballOddsBet) => {
+  const name = normalizeMarketName(market.name);
+  return name.includes('1st half') || name.includes('first half');
+};
 
 const isMatchOddsMarket = (market: ApiFootballOddsBet) => {
   const name = normalizeMarketName(market.name);
@@ -55,9 +83,23 @@ const getGoalLine = (market: ApiFootballOddsBet) => {
 
 const formatMarketTitle = (market: ApiFootballOddsBet) => {
   if (isMatchOddsMarket(market)) return 'Resultado da Partida';
-  if (isGoalLineMarket(market)) return `Mais/Menos ${getGoalLine(market)}`;
+  if (isGoalLineMarket(market)) return `${isFirstHalfMarket(market) ? '1o Tempo ' : ''}Mais/Menos ${getGoalLine(market)}`;
   if (normalizeMarketName(market.name).includes('double chance')) return 'Dupla Chance';
   return market.name;
+};
+
+const getSelectionKey = (market: ApiFootballOddsBet, value: string, handicap?: string | null) => {
+  const normalized = normalizeMarketName(value);
+
+  if (isMatchOddsMarket(market)) {
+    if (['home', '1'].includes(normalized)) return 'home';
+    if (['away', '2'].includes(normalized)) return 'away';
+    if (['draw', 'x'].includes(normalized)) return 'draw';
+  }
+
+  if (isGoalLineMarket(market)) return `${normalized}-${handicap ?? getGoalLine(market)}`;
+
+  return `${normalized}-${handicap ?? ''}`;
 };
 
 const formatSelectionName = (market: ApiFootballOddsBet, value: string, game?: ApiFootballReplayGame) => {
@@ -105,34 +147,139 @@ const sortMarketValues = (market: ApiFootballOddsBet) => {
   return market.values;
 };
 
-const getMarketKey = (market: ApiFootballOddsBet) =>
-  `${market.id}-${market.name}-${market.values.map((value) => `${value.value}:${value.handicap ?? ''}`).join('|')}`;
-
-const getOrderedMarkets = (snapshot?: ApiFootballReplaySnapshot) => {
-  const uniqueMarkets = new Map<string, ApiFootballOddsBet>();
-
-  getOddsMarkets(snapshot).forEach((market) => {
-    uniqueMarkets.set(getMarketKey(market), market);
-  });
-
-  return [...uniqueMarkets.values()].sort((a, b) => {
-    const aMatch = isMatchOddsMarket(a);
-    const bMatch = isMatchOddsMarket(b);
-    if (aMatch !== bMatch) return aMatch ? -1 : 1;
-
-    const aGoal = isGoalLineMarket(a);
-    const bGoal = isGoalLineMarket(b);
-    if (aGoal !== bGoal) return aGoal ? -1 : 1;
-    if (aGoal && bGoal) return getGoalLine(a) - getGoalLine(b);
-
-    return formatMarketTitle(a).localeCompare(formatMarketTitle(b), 'pt-BR');
-  });
+const getDisplayMarketKey = (market: ApiFootballOddsBet) => {
+  if (isMatchOddsMarket(market)) return 'match-odds';
+  if (isGoalLineMarket(market)) return `${isFirstHalfMarket(market) ? 'first-half-' : ''}goal-line-${getGoalLine(market)}`;
+  if (normalizeMarketName(market.name).includes('double chance')) return 'double-chance';
+  return `market-${market.id}-${market.name}`;
 };
 
-const getStatValue = (snapshot: ApiFootballReplaySnapshot | undefined, teamId: number | undefined, label: string) => {
+const getMarketSortOrder = (market: ApiFootballOddsBet) => {
+  if (isMatchOddsMarket(market)) return 0;
+  if (isGoalLineMarket(market)) return 1;
+  return 2;
+};
+
+const toOddNumber = (odd: string | undefined) => {
+  const numeric = Number(String(odd ?? '').replace(',', '.'));
+  return Number.isFinite(numeric) ? numeric : Number.POSITIVE_INFINITY;
+};
+
+const BETFAIR_TICKS = [
+  { from: 101, to: 200, step: 1 },
+  { from: 202, to: 300, step: 2 },
+  { from: 305, to: 400, step: 5 },
+  { from: 410, to: 600, step: 10 },
+  { from: 620, to: 1000, step: 20 },
+  { from: 1050, to: 2000, step: 50 },
+  { from: 2100, to: 3000, step: 100 },
+  { from: 3200, to: 5000, step: 200 },
+  { from: 5500, to: 10000, step: 500 },
+  { from: 11000, to: 100000, step: 1000 },
+].flatMap(({ from, to, step }) => {
+  const ticks: number[] = [];
+  for (let tick = from; tick <= to; tick += step) {
+    ticks.push(tick / 100);
+  }
+  return ticks;
+});
+
+const getNearestTickIndex = (odd: string | undefined) => {
+  const numeric = toOddNumber(odd);
+  if (!Number.isFinite(numeric)) return -1;
+
+  return BETFAIR_TICKS.reduce((nearestIndex, tick, index) => {
+    const currentDistance = Math.abs(tick - numeric);
+    const nearestDistance = Math.abs(BETFAIR_TICKS[nearestIndex] - numeric);
+    return currentDistance < nearestDistance ? index : nearestIndex;
+  }, 0);
+};
+
+const formatTickOdd = (odd: number) => {
+  if (odd < 4) return odd.toFixed(2);
+  if (odd < 20) return odd.toFixed(1);
+  return odd.toFixed(0);
+};
+
+const getSyntheticLayOdd = (backOdd: string | undefined) => {
+  const nearestIndex = getNearestTickIndex(backOdd);
+  if (nearestIndex < 0) return undefined;
+
+  const layIndex = Math.min(nearestIndex + 2, BETFAIR_TICKS.length - 1);
+  return formatTickOdd(BETFAIR_TICKS[layIndex]);
+};
+
+const getDisplayMarkets = (snapshot?: ApiFootballReplaySnapshot, game?: ApiFootballReplayGame): OddsDisplayMarket[] => {
+  const marketGroups = new Map<
+    string,
+    {
+      title: string;
+      sortOrder: number;
+      line: number;
+      selections: Map<string, { label: string; quotes: OddsSide[] }>;
+    }
+  >();
+
+  getOddsMarkets(snapshot).forEach((market) => {
+    const marketKey = getDisplayMarketKey(market);
+    const group = marketGroups.get(marketKey) ?? {
+      title: formatMarketTitle(market),
+      sortOrder: getMarketSortOrder(market),
+      line: getGoalLine(market),
+      selections: new Map<string, { label: string; quotes: OddsSide[] }>(),
+    };
+
+    sortMarketValues(market).forEach((value) => {
+      const selectionKey = getSelectionKey(market, value.value, value.handicap);
+      const selection = group.selections.get(selectionKey) ?? {
+        label: formatSelectionName(market, value.value, game),
+        quotes: [],
+      };
+
+      if (value.odd) {
+        selection.quotes.push({ odd: value.odd, suspended: value.suspended });
+      }
+
+      group.selections.set(selectionKey, selection);
+    });
+
+    marketGroups.set(marketKey, group);
+  });
+
+  return [...marketGroups.entries()]
+    .map(([key, group]) => ({
+      key,
+      title: group.title,
+      sortOrder: group.sortOrder,
+      line: group.line,
+      selections: [...group.selections.entries()].map(([selectionKey, selection]) => {
+        const quotes = selection.quotes.sort((a, b) => toOddNumber(a.odd) - toOddNumber(b.odd));
+        const back = quotes[0];
+        const lay = back && { odd: getSyntheticLayOdd(back.odd) ?? back.odd, suspended: back.suspended };
+
+        return {
+          key: selectionKey,
+          label: selection.label,
+          back,
+          lay,
+          suspended: quotes.some((quote) => quote.suspended),
+        };
+      }),
+    }))
+    .sort((a, b) => {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+      if (a.sortOrder === 1 && b.sortOrder === 1) return a.line - b.line;
+      return a.title.localeCompare(b.title, 'pt-BR');
+    });
+};
+
+const getStatValue = (snapshot: ApiFootballReplaySnapshot | undefined, teamId: number | undefined, labels: string | string[]) => {
   if (!snapshot || !teamId) return '-';
+  const sourceLabels = Array.isArray(labels) ? labels : [labels];
   const item = snapshot.statistics.find((row) => row.team.id === teamId);
-  const stat = item?.statistics.find((row) => row.type.toLowerCase() === label.toLowerCase());
+  const stat = item?.statistics.find((row) =>
+    sourceLabels.some((label) => row.type.toLowerCase() === label.toLowerCase()),
+  );
   return stat?.value ?? '-';
 };
 
@@ -232,17 +379,13 @@ function StatComparison({
 
 function MarketBlock({
   market,
-  game,
   collapsed,
   onToggle,
 }: {
-  market: ApiFootballOddsBet;
-  game?: ApiFootballReplayGame;
+  market: OddsDisplayMarket;
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const values = sortMarketValues(market);
-
   return (
     <div className="overflow-hidden rounded-md border border-white/8 bg-[#090d2b]">
       <button
@@ -251,8 +394,8 @@ function MarketBlock({
         className="flex w-full items-center justify-between gap-3 bg-[#171b46] px-3 py-2 text-left transition hover:bg-[#1d2255]"
       >
         <span>
-          <span className="block text-sm font-black uppercase tracking-wide text-white">{formatMarketTitle(market)}</span>
-          <span className="text-xs font-semibold text-slate-400">{values.length} selecao(oes)</span>
+          <span className="block text-sm font-black uppercase tracking-wide text-white">{market.title}</span>
+          <span className="text-xs font-semibold text-slate-400">{market.selections.length} selecao(oes)</span>
         </span>
         <span className="flex items-center gap-2 text-xs font-semibold text-slate-400">
           {collapsed ? 'Expandir' : 'Recolher'}
@@ -262,26 +405,30 @@ function MarketBlock({
 
       {!collapsed && (
         <div className="p-3">
-          <div className="mb-2 grid grid-cols-[1fr_170px] gap-3 text-right text-xs font-black text-slate-300">
+          <div className="mb-2 grid grid-cols-[1fr_150px_150px] gap-3 text-center text-xs font-black text-slate-300">
             <span />
-            <span>Odd</span>
+            <span>Apostar a Favor (Back)</span>
+            <span>Apostar Contra (Lay)</span>
           </div>
           <div className="space-y-2">
-            {values.slice(0, 16).map((value) => (
-              <div key={`${value.value}-${value.handicap ?? ''}`} className="grid grid-cols-[1fr_170px] items-center gap-3">
+            {market.selections.slice(0, 16).map((selection) => (
+              <div key={selection.key} className="grid grid-cols-[1fr_150px_150px] items-center gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-black uppercase tracking-wide text-white">
-                    {formatSelectionName(market, value.value, game)}
+                    {selection.label}
                   </p>
-                  {value.suspended && <p className="text-xs font-semibold text-rose-300">Suspenso</p>}
+                  {selection.suspended && <p className="text-xs font-semibold text-rose-300">Suspenso</p>}
                 </div>
-                <div className="rounded-md bg-white px-4 py-2 text-center text-[#141844]">
-                  <p className="text-lg font-black">{value.odd || '-'}</p>
+                <div className="rounded-md bg-sky-100 px-4 py-2 text-center text-[#141844]">
+                  <p className="text-lg font-black">{selection.back?.odd ?? '-'}</p>
+                </div>
+                <div className="rounded-md bg-rose-100 px-4 py-2 text-center text-[#141844]">
+                  <p className="text-lg font-black">{selection.lay?.odd ?? '-'}</p>
                 </div>
               </div>
             ))}
           </div>
-          {values.length > 16 && <p className="mt-3 text-right text-xs font-semibold text-slate-400">Mais {values.length - 16} selecao(oes) ocultas</p>}
+          {market.selections.length > 16 && <p className="mt-3 text-right text-xs font-semibold text-slate-400">Mais {market.selections.length - 16} selecao(oes) ocultas</p>}
         </div>
       )}
     </div>
@@ -289,11 +436,11 @@ function MarketBlock({
 }
 
 function OddsPanel({ snapshot, game }: { snapshot?: ApiFootballReplaySnapshot; game?: ApiFootballReplayGame }) {
-  const [collapsedMarkets, setCollapsedMarkets] = useState<string[]>([]);
-  const markets = getOrderedMarkets(snapshot).slice(0, 30);
+  const [expandedMarkets, setExpandedMarkets] = useState<string[]>([]);
+  const markets = getDisplayMarkets(snapshot, game).slice(0, 30);
 
   const toggleMarket = (marketKey: string) => {
-    setCollapsedMarkets((current) =>
+    setExpandedMarkets((current) =>
       current.includes(marketKey) ? current.filter((key) => key !== marketKey) : [...current, marketKey],
     );
   };
@@ -303,15 +450,12 @@ function OddsPanel({ snapshot, game }: { snapshot?: ApiFootballReplaySnapshot; g
       <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
         {markets.length === 0 && <p className="text-sm text-slate-500">Nenhuma odd gravada neste snapshot.</p>}
         {markets.map((market) => {
-          const marketKey = getMarketKey(market);
-
           return (
             <MarketBlock
-              key={marketKey}
+              key={market.key}
               market={market}
-              game={game}
-              collapsed={collapsedMarkets.includes(marketKey)}
-              onToggle={() => toggleMarket(marketKey)}
+              collapsed={!expandedMarkets.includes(market.key)}
+              onToggle={() => toggleMarket(market.key)}
             />
           );
         })}
@@ -322,19 +466,21 @@ function OddsPanel({ snapshot, game }: { snapshot?: ApiFootballReplaySnapshot; g
 
 function ReplayControls({
   game,
+  timeline,
   snapshotIndex,
   playing,
   onIndex,
   onPlaying,
 }: {
   game: ApiFootballReplayGame;
+  timeline: ApiFootballReplaySnapshot[];
   snapshotIndex: number;
   playing: boolean;
   onIndex: (index: number) => void;
   onPlaying: (playing: boolean) => void;
 }) {
-  const snapshot = game.timeline[snapshotIndex];
-  const maxIndex = Math.max(0, game.timeline.length - 1);
+  const snapshot = timeline[snapshotIndex];
+  const maxIndex = Math.max(0, timeline.length - 1);
 
   return (
     <Card title="Controle do replay">
@@ -400,22 +546,20 @@ function ReplayControls({
 function StatsPanel({ game, snapshot }: { game?: ApiFootballReplayGame; snapshot?: ApiFootballReplaySnapshot }) {
   const homeId = game?.summary.homeTeam?.id;
   const awayId = game?.summary.awayTeam?.id;
-  const labels = [
-    'Gols',
-    'Cartoes Amarelos',
-    'Cartoes Vermelhos',
-    'Substituicoes',
-    'Total Shots',
-    'Shots on Goal',
-    'Shots off Goal',
-    'Blocked Shots',
-    'Corner Kicks',
-    'Ball Possession',
-    'Yellow Cards',
-    'Red Cards',
-    'Goalkeeper Saves',
-    'Fouls',
-    'Passes %',
+  const stats = [
+    { label: 'Gols', sourceLabels: ['Gols'] },
+    { label: 'Cartoes amarelos', sourceLabels: ['Cartoes Amarelos', 'Yellow Cards'] },
+    { label: 'Cartoes vermelhos', sourceLabels: ['Cartoes Vermelhos', 'Red Cards'] },
+    { label: 'Substituicoes', sourceLabels: ['Substituicoes'] },
+    { label: 'Finalizacoes', sourceLabels: ['Total Shots'] },
+    { label: 'Finalizacoes no alvo', sourceLabels: ['Shots on Goal'] },
+    { label: 'Finalizacoes para fora', sourceLabels: ['Shots off Goal'] },
+    { label: 'Chutes bloqueados', sourceLabels: ['Blocked Shots'] },
+    { label: 'Escanteios', sourceLabels: ['Corner Kicks'] },
+    { label: 'Posse de bola', sourceLabels: ['Ball Possession'] },
+    { label: 'Defesas do goleiro', sourceLabels: ['Goalkeeper Saves'] },
+    { label: 'Faltas', sourceLabels: ['Fouls'] },
+    { label: 'Precisao dos passes', sourceLabels: ['Passes %'] },
   ];
 
   return (
@@ -426,12 +570,12 @@ function StatsPanel({ game, snapshot }: { game?: ApiFootballReplayGame; snapshot
         <p className="text-right font-semibold text-violet-300">{game?.summary.awayTeam?.name ?? 'Visitante'}</p>
       </div>
       <div className="space-y-2">
-        {labels.map((label) => (
+        {stats.map((stat) => (
           <StatComparison
-            key={label}
-            label={label}
-            home={getStatValue(snapshot, homeId, label)}
-            away={getStatValue(snapshot, awayId, label)}
+            key={stat.label}
+            label={stat.label}
+            home={getStatValue(snapshot, homeId, stat.sourceLabels)}
+            away={getStatValue(snapshot, awayId, stat.sourceLabels)}
           />
         ))}
       </div>
@@ -458,7 +602,12 @@ export function ReplayPage({ delay }: ReplayPageProps) {
     [activeFixtureId],
   );
 
-  const snapshot = game?.timeline[snapshotIndex];
+  const playableTimeline = useMemo(() => {
+    if (!game) return [];
+    const playingSnapshots = game.timeline.filter(isPlayingSnapshot);
+    return playingSnapshots.length > 0 ? playingSnapshots : game.timeline;
+  }, [game]);
+  const snapshot = playableTimeline[snapshotIndex];
 
   useEffect(() => {
     setSnapshotIndex(0);
@@ -471,7 +620,7 @@ export function ReplayPage({ delay }: ReplayPageProps) {
     const interval = window.setInterval(() => {
       setSnapshotIndex((current) => {
         const next = current + 1;
-        if (next >= game.timeline.length) {
+        if (next >= playableTimeline.length) {
           setPlaying(false);
           return current;
         }
@@ -480,7 +629,12 @@ export function ReplayPage({ delay }: ReplayPageProps) {
     }, delay);
 
     return () => window.clearInterval(interval);
-  }, [delay, game, playing]);
+  }, [delay, game, playableTimeline.length, playing]);
+
+  useEffect(() => {
+    if (snapshotIndex < playableTimeline.length) return;
+    setSnapshotIndex(Math.max(0, playableTimeline.length - 1));
+  }, [playableTimeline.length, snapshotIndex]);
 
   return (
     <>
@@ -506,14 +660,15 @@ export function ReplayPage({ delay }: ReplayPageProps) {
               <>
                 <ReplayControls
                   game={game}
-                  snapshotIndex={Math.min(snapshotIndex, Math.max(0, game.timeline.length - 1))}
+                  timeline={playableTimeline}
+                  snapshotIndex={Math.min(snapshotIndex, Math.max(0, playableTimeline.length - 1))}
                   playing={playing}
                   onIndex={setSnapshotIndex}
                   onPlaying={setPlaying}
                 />
-                <div className="grid gap-5 xl:grid-cols-2">
-                  <StatsPanel game={game} snapshot={snapshot} />
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
                   <OddsPanel snapshot={snapshot} game={game} />
+                  <StatsPanel game={game} snapshot={snapshot} />
                 </div>
               </>
             )}
