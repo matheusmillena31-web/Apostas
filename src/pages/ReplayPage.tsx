@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Pause, Play, RotateCcw, Search, SkipBack, SkipForward } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Pause, Play, RotateCcw, Search, SkipBack, SkipForward, X } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
@@ -14,6 +14,7 @@ import {
   ApiFootballReplaySnapshot,
 } from '../types/api';
 import { Bot } from '../types';
+import { formatCurrency, uid } from '../utils/formatters';
 
 type ReplayPageProps = {
   bots: Bot[];
@@ -39,6 +40,32 @@ type OddsDisplayMarket = {
   selections: OddsDisplaySelection[];
   sortOrder: number;
   line: number;
+};
+
+type BetSide = 'back' | 'lay';
+
+type BetSlipSelection = {
+  marketKey: string;
+  marketTitle: string;
+  selectionKey: string;
+  selectionLabel: string;
+  side: BetSide;
+  odd: string;
+};
+
+type BetTicket = BetSlipSelection & {
+  id: string;
+  fixtureLabel: string;
+  placedAt: string;
+  replayMinute: string;
+  stake: number;
+  liability: number;
+};
+
+type CashoutResult = {
+  hedgeStake: number;
+  profit: number;
+  oppositeOdd: number;
 };
 
 const formatScore = (home: number | null, away: number | null) =>
@@ -75,17 +102,85 @@ const isGoalLineMarket = (market: ApiFootballOddsBet) => {
   return hasGoalLine && (name.includes('over/under') || name.includes('match goals') || name.includes('goals over'));
 };
 
-const getGoalLine = (market: ApiFootballOddsBet) => {
-  const line = market.values.find((value) => value.handicap)?.handicap;
+const getNumericLine = (line?: string | null) => {
   const numeric = Number(String(line ?? '').replace(',', '.'));
   return Number.isFinite(numeric) ? numeric : 999;
 };
 
-const formatMarketTitle = (market: ApiFootballOddsBet) => {
-  if (isMatchOddsMarket(market)) return 'Resultado da Partida';
-  if (isGoalLineMarket(market)) return `${isFirstHalfMarket(market) ? '1o Tempo ' : ''}Mais/Menos ${getGoalLine(market)}`;
-  if (normalizeMarketName(market.name).includes('double chance')) return 'Dupla Chance';
-  return market.name;
+const getGoalLine = (market: ApiFootballOddsBet) => getNumericLine(market.values.find((value) => value.handicap)?.handicap);
+
+const formatGoalLine = (line: number) => line.toFixed(1);
+
+const FULL_TIME_GOAL_LINES = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5];
+const FIRST_HALF_GOAL_LINES = [0.5, 1.5, 2.5, 3.5];
+const RESULT_TOTAL_GOAL_LINES = [1.5, 2.5, 3.5, 4.5];
+
+const hasAllowedLine = (line: number, allowedLines: number[]) =>
+  allowedLines.some((allowedLine) => Math.abs(allowedLine - line) < 0.001);
+
+const isDoubleChanceMarket = (market: ApiFootballOddsBet) => normalizeMarketName(market.name).includes('double chance');
+const isDrawNoBetMarket = (market: ApiFootballOddsBet) => normalizeMarketName(market.name) === 'draw no bet';
+const isHalfTimeFullTimeMarket = (market: ApiFootballOddsBet) => normalizeMarketName(market.name) === 'half time/full time';
+const isBothTeamsScoreMarket = (market: ApiFootballOddsBet) => normalizeMarketName(market.name) === 'both teams to score';
+const isFinalScoreMarket = (market: ApiFootballOddsBet) => normalizeMarketName(market.name) === 'final score';
+const isFirstHalfCorrectScoreMarket = (market: ApiFootballOddsBet) => normalizeMarketName(market.name) === 'correct score (1st half)';
+const isResultBothTeamsScoreMarket = (market: ApiFootballOddsBet) => normalizeMarketName(market.name) === 'result / both teams to score';
+const isIntervalMarket = (market: ApiFootballOddsBet) => normalizeMarketName(market.name) === '1st goal in interval';
+
+const getResultTotalGoalLine = (market: ApiFootballOddsBet) => {
+  const name = normalizeMarketName(market.name);
+  const resultTotalMatch = name.match(/result.*(?:total|goals).*?(\d+(?:[.,]\d+)?)/);
+  if (!resultTotalMatch) return undefined;
+
+  const line = getNumericLine(resultTotalMatch[1]);
+  return hasAllowedLine(line, RESULT_TOTAL_GOAL_LINES) ? line : undefined;
+};
+
+const getDisplayGroup = (market: ApiFootballOddsBet, value: ApiFootballOddsBet['values'][number]) => {
+  const line = getNumericLine(value.handicap);
+
+  if (isMatchOddsMarket(market)) {
+    return { key: 'match-odds', title: 'Resultado da Partida', sortOrder: 0, line: 0 };
+  }
+
+  if (isGoalLineMarket(market) && line !== 999) {
+    const firstHalf = isFirstHalfMarket(market);
+    const allowedLines = firstHalf ? FIRST_HALF_GOAL_LINES : FULL_TIME_GOAL_LINES;
+
+    if (!hasAllowedLine(line, allowedLines)) return undefined;
+
+    const formattedLine = formatGoalLine(line);
+    return {
+      key: `${firstHalf ? 'first-half-' : ''}goal-line-${formattedLine}`,
+      title: `${firstHalf ? '1o Tempo ' : ''}Mais/Menos ${formattedLine}`,
+      sortOrder: firstHalf ? 20 + line : 10 + line,
+      line,
+    };
+  }
+
+  if (isIntervalMarket(market)) return { key: 'interval', title: 'Intervalo', sortOrder: 30, line: 0 };
+  if (isHalfTimeFullTimeMarket(market)) return { key: 'half-time-full-time', title: '1o Tempo/Final do jogo', sortOrder: 40, line: 0 };
+  if (isBothTeamsScoreMarket(market)) return { key: 'both-teams-score', title: 'Ambas marcam', sortOrder: 50, line: 0 };
+  if (isDoubleChanceMarket(market)) return { key: 'double-chance', title: 'Chance Dupla', sortOrder: 60, line: 0 };
+  if (isDrawNoBetMarket(market)) return { key: 'draw-no-bet', title: 'Empate anula a aposta', sortOrder: 70, line: 0 };
+  if (isFinalScoreMarket(market)) return { key: 'final-score', title: 'Placar Exato', sortOrder: 80, line: 0 };
+  if (isFirstHalfCorrectScoreMarket(market)) return { key: 'first-half-correct-score', title: 'Placar no Intervalo', sortOrder: 90, line: 0 };
+  if (isResultBothTeamsScoreMarket(market)) {
+    return { key: 'result-both-teams-score', title: 'Resultado da Partida e Ambas marcam', sortOrder: 100, line: 0 };
+  }
+
+  const resultTotalLine = getResultTotalGoalLine(market);
+  if (resultTotalLine !== undefined) {
+    const formattedLine = formatGoalLine(resultTotalLine);
+    return {
+      key: `result-total-goals-${formattedLine}`,
+      title: `Resultado da Partida e Total de Gols ${formattedLine}`,
+      sortOrder: 110 + resultTotalLine,
+      line: resultTotalLine,
+    };
+  }
+
+  return undefined;
 };
 
 const getSelectionKey = (market: ApiFootballOddsBet, value: string, handicap?: string | null) => {
@@ -102,11 +197,21 @@ const getSelectionKey = (market: ApiFootballOddsBet, value: string, handicap?: s
   return `${normalized}-${handicap ?? ''}`;
 };
 
-const formatSelectionName = (market: ApiFootballOddsBet, value: string, game?: ApiFootballReplayGame) => {
+const formatSelectionName = (market: ApiFootballOddsBet, value: string, game?: ApiFootballReplayGame, handicap?: string | null) => {
   const normalized = normalizeMarketName(value);
   const homeName = game?.summary.homeTeam?.name ?? 'Mandante';
   const awayName = game?.summary.awayTeam?.name ?? 'Visitante';
-  const line = market.values.find((item) => item.handicap)?.handicap;
+  const line = handicap ?? market.values.find((item) => item.handicap)?.handicap;
+  const replaceTeams = (source: string) =>
+    source
+      .replace(/\bHome\b/gi, homeName)
+      .replace(/\bAway\b/gi, awayName)
+      .replace(/\bDraw\b/gi, 'Empate')
+      .replace(/\bYes\b/gi, 'Sim')
+      .replace(/\bNo\b/gi, 'Nao')
+      .replace(/\b1\b/g, homeName)
+      .replace(/\b2\b/g, awayName)
+      .replace(/\bX\b/gi, 'Empate');
 
   if (isMatchOddsMarket(market)) {
     if (['home', '1'].includes(normalized)) return homeName;
@@ -119,11 +224,13 @@ const formatSelectionName = (market: ApiFootballOddsBet, value: string, game?: A
     if (normalized === 'under') return `Menos de ${line}`;
   }
 
-  if (normalizeMarketName(market.name).includes('double chance')) {
-    return value
-      .replace(/Home/gi, homeName)
-      .replace(/Away/gi, awayName)
-      .replace(/Draw/gi, 'Empate');
+  if (isDoubleChanceMarket(market) || isDrawNoBetMarket(market) || isHalfTimeFullTimeMarket(market) || isResultBothTeamsScoreMarket(market)) {
+    return replaceTeams(value);
+  }
+
+  if (isBothTeamsScoreMarket(market)) {
+    if (normalized === 'yes') return 'Sim';
+    if (normalized === 'no') return 'Nao';
   }
 
   return value;
@@ -147,22 +254,32 @@ const sortMarketValues = (market: ApiFootballOddsBet) => {
   return market.values;
 };
 
-const getDisplayMarketKey = (market: ApiFootballOddsBet) => {
-  if (isMatchOddsMarket(market)) return 'match-odds';
-  if (isGoalLineMarket(market)) return `${isFirstHalfMarket(market) ? 'first-half-' : ''}goal-line-${getGoalLine(market)}`;
-  if (normalizeMarketName(market.name).includes('double chance')) return 'double-chance';
-  return `market-${market.id}-${market.name}`;
-};
-
-const getMarketSortOrder = (market: ApiFootballOddsBet) => {
-  if (isMatchOddsMarket(market)) return 0;
-  if (isGoalLineMarket(market)) return 1;
-  return 2;
-};
-
 const toOddNumber = (odd: string | undefined) => {
   const numeric = Number(String(odd ?? '').replace(',', '.'));
   return Number.isFinite(numeric) ? numeric : Number.POSITIVE_INFINITY;
+};
+
+const toValidOddNumber = (odd: string | undefined) => {
+  const numeric = toOddNumber(odd);
+  return Number.isFinite(numeric) && numeric > 1 ? numeric : undefined;
+};
+
+const parseStakeValue = (value: string) => {
+  const numeric = Number(value.replace(',', '.'));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+};
+
+const formatPlainOdd = (odd: string) => odd.replace('.', ',');
+
+const formatSignedCurrency = (value: number) => {
+  const amount = formatCurrency(Math.abs(value));
+  return value >= 0 ? amount : `-${amount}`;
+};
+
+const getTicketLiability = (side: BetSide, odd: string, stake: number) => {
+  if (side === 'back') return stake;
+  const numericOdd = toValidOddNumber(odd);
+  return numericOdd ? stake * (numericOdd - 1) : 0;
 };
 
 const BETFAIR_TICKS = [
@@ -221,18 +338,19 @@ const getDisplayMarkets = (snapshot?: ApiFootballReplaySnapshot, game?: ApiFootb
   >();
 
   getOddsMarkets(snapshot).forEach((market) => {
-    const marketKey = getDisplayMarketKey(market);
-    const group = marketGroups.get(marketKey) ?? {
-      title: formatMarketTitle(market),
-      sortOrder: getMarketSortOrder(market),
-      line: getGoalLine(market),
-      selections: new Map<string, { label: string; quotes: OddsSide[] }>(),
-    };
-
     sortMarketValues(market).forEach((value) => {
+      const displayGroup = getDisplayGroup(market, value);
+      if (!displayGroup) return;
+
+      const group = marketGroups.get(displayGroup.key) ?? {
+        title: displayGroup.title,
+        sortOrder: displayGroup.sortOrder,
+        line: displayGroup.line,
+        selections: new Map<string, { label: string; quotes: OddsSide[] }>(),
+      };
       const selectionKey = getSelectionKey(market, value.value, value.handicap);
       const selection = group.selections.get(selectionKey) ?? {
-        label: formatSelectionName(market, value.value, game),
+        label: formatSelectionName(market, value.value, game, value.handicap),
         quotes: [],
       };
 
@@ -241,9 +359,8 @@ const getDisplayMarkets = (snapshot?: ApiFootballReplaySnapshot, game?: ApiFootb
       }
 
       group.selections.set(selectionKey, selection);
+      marketGroups.set(displayGroup.key, group);
     });
-
-    marketGroups.set(marketKey, group);
   });
 
   return [...marketGroups.entries()]
@@ -271,6 +388,37 @@ const getDisplayMarkets = (snapshot?: ApiFootballReplaySnapshot, game?: ApiFootb
       if (a.sortOrder === 1 && b.sortOrder === 1) return a.line - b.line;
       return a.title.localeCompare(b.title, 'pt-BR');
     });
+};
+
+const findCurrentSelection = (
+  markets: OddsDisplayMarket[],
+  ticket: Pick<BetTicket, 'marketKey' | 'selectionKey'>,
+) => markets
+  .find((market) => market.key === ticket.marketKey)
+  ?.selections.find((selection) => selection.key === ticket.selectionKey);
+
+const getCashoutResult = (ticket: BetTicket, markets: OddsDisplayMarket[]): CashoutResult | undefined => {
+  const currentSelection = findCurrentSelection(markets, ticket);
+  const entryOdd = toValidOddNumber(ticket.odd);
+  const oppositeOdd = toValidOddNumber(ticket.side === 'back' ? currentSelection?.lay?.odd : currentSelection?.back?.odd);
+
+  if (!entryOdd || !oppositeOdd) return undefined;
+
+  if (ticket.side === 'back') {
+    const hedgeStake = (ticket.stake * entryOdd) / oppositeOdd;
+    return {
+      hedgeStake,
+      profit: hedgeStake - ticket.stake,
+      oppositeOdd,
+    };
+  }
+
+  const hedgeStake = (ticket.stake * entryOdd) / oppositeOdd;
+  return {
+    hedgeStake,
+    profit: ticket.stake - hedgeStake,
+    oppositeOdd,
+  };
 };
 
 const getStatValue = (snapshot: ApiFootballReplaySnapshot | undefined, teamId: number | undefined, labels: string | string[]) => {
@@ -312,7 +460,7 @@ function ReplayGameSearch({
   }, [games, query]);
 
   return (
-    <Card title="Partidas capturadas" subtitle="Jogos reconstruidos a partir dos snapshots gravados pelo backend.">
+    <Card title="Partidas encontradas" subtitle="Jogos reconstruidos a partir dos snapshots gravados pelo backend.">
       <div className="space-y-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
@@ -381,11 +529,29 @@ function MarketBlock({
   market,
   collapsed,
   onToggle,
+  onSelectQuote,
 }: {
   market: OddsDisplayMarket;
   collapsed: boolean;
   onToggle: () => void;
+  onSelectQuote: (selection: OddsDisplaySelection, side: BetSide, odd: string) => void;
 }) {
+  const renderQuoteButton = (selection: OddsDisplaySelection, side: BetSide, odd?: string) => {
+    const disabled = !odd || selection.suspended;
+    const sideClass = side === 'back' ? 'bg-sky-100 hover:bg-sky-200' : 'bg-rose-100 hover:bg-rose-200';
+
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => odd && onSelectQuote(selection, side, odd)}
+        className={`rounded-md px-4 py-2 text-center text-[#141844] transition disabled:cursor-not-allowed disabled:opacity-50 ${sideClass}`}
+      >
+        <p className="text-lg font-black">{odd ?? '-'}</p>
+      </button>
+    );
+  };
+
   return (
     <div className="overflow-hidden rounded-md border border-white/8 bg-[#090d2b]">
       <button
@@ -419,12 +585,8 @@ function MarketBlock({
                   </p>
                   {selection.suspended && <p className="text-xs font-semibold text-rose-300">Suspenso</p>}
                 </div>
-                <div className="rounded-md bg-sky-100 px-4 py-2 text-center text-[#141844]">
-                  <p className="text-lg font-black">{selection.back?.odd ?? '-'}</p>
-                </div>
-                <div className="rounded-md bg-rose-100 px-4 py-2 text-center text-[#141844]">
-                  <p className="text-lg font-black">{selection.lay?.odd ?? '-'}</p>
-                </div>
+                {renderQuoteButton(selection, 'back', selection.back?.odd)}
+                {renderQuoteButton(selection, 'lay', selection.lay?.odd)}
               </div>
             ))}
           </div>
@@ -435,9 +597,194 @@ function MarketBlock({
   );
 }
 
-function OddsPanel({ snapshot, game }: { snapshot?: ApiFootballReplaySnapshot; game?: ApiFootballReplayGame }) {
+function BetSlipPanel({
+  selection,
+  stakeValue,
+  onStakeValue,
+  onCancel,
+  onConfirm,
+}: {
+  selection?: BetSlipSelection;
+  stakeValue: string;
+  onStakeValue: (value: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!selection) {
+    return (
+      <Card title="Boleta" subtitle="Selecione uma odd back ou lay para montar a aposta.">
+        <div className="rounded-md border border-dashed border-white/12 bg-ink-900/70 px-4 py-5 text-sm text-slate-500">
+          Nenhum mercado selecionado.
+        </div>
+      </Card>
+    );
+  }
+
+  const stake = parseStakeValue(stakeValue);
+  const liability = getTicketLiability(selection.side, selection.odd, stake);
+  const sideLabel = selection.side === 'back' ? 'Aposta a favor' : 'Aposta contra';
+  const panelClass = selection.side === 'back' ? 'border-sky-200/60 bg-sky-100 text-[#11183f]' : 'border-rose-200/70 bg-rose-100 text-[#11183f]';
+
+  return (
+    <Card title="Boleta" subtitle="Confira a selecao antes de confirmar.">
+      <div className={`overflow-hidden rounded-md border ${panelClass}`}>
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <div>
+            <p className="text-sm font-semibold">{sideLabel}</p>
+            <p className="text-base font-black">{selection.selectionLabel}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded p-2 text-red-500 transition hover:bg-white/40"
+            aria-label="Cancelar selecao"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className={`grid gap-2 px-3 pb-3 ${selection.side === 'lay' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          <label>
+            <span className="mb-1 block text-xs font-semibold text-slate-700">Odd</span>
+            <Input value={formatPlainOdd(selection.odd)} readOnly className="bg-[#172149] text-center text-base font-black" />
+          </label>
+          <label>
+            <span className="mb-1 block text-xs font-semibold text-slate-700">Stake</span>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={stakeValue}
+              onChange={(event) => onStakeValue(event.target.value)}
+              className="bg-[#172149] text-center text-base font-black"
+            />
+          </label>
+          {selection.side === 'lay' && (
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-slate-700">Responsabilidade</span>
+              <Input value={formatCurrency(liability)} readOnly className="bg-[#172149] text-center text-base font-black" />
+            </label>
+          )}
+        </div>
+      </div>
+      <Button className="mt-3 w-full" onClick={onConfirm} disabled={stake <= 0} icon={<Check className="h-4 w-4" />}>
+        Confirmar aposta
+      </Button>
+    </Card>
+  );
+}
+
+function BetCouponsPanel({
+  tickets,
+  markets,
+  lastCashout,
+  onCashout,
+  onDelete,
+}: {
+  tickets: BetTicket[];
+  markets: OddsDisplayMarket[];
+  lastCashout?: string;
+  onCashout: (ticket: BetTicket, result: CashoutResult) => void;
+  onDelete: (ticketId: string) => void;
+}) {
+  return (
+    <Card title="Cupons de Apostas" subtitle="Operacoes em andamento no replay.">
+      <div className="space-y-3">
+        {lastCashout && (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/12 px-3 py-2 text-sm font-semibold text-emerald-200">
+            {lastCashout}
+          </div>
+        )}
+        {tickets.length === 0 && (
+          <div className="rounded-md border border-dashed border-white/12 bg-ink-900/70 px-4 py-5 text-sm text-slate-500">
+            Nenhuma aposta aberta.
+          </div>
+        )}
+        {tickets.map((ticket) => {
+          const cashout = getCashoutResult(ticket, markets);
+          const isBack = ticket.side === 'back';
+
+          return (
+            <div
+              key={ticket.id}
+              className={`overflow-hidden rounded-md border ${isBack ? 'border-sky-200/60 bg-sky-100 text-[#11183f]' : 'border-rose-200/70 bg-rose-100 text-[#11183f]'}`}
+            >
+              <div className={`${isBack ? 'bg-sky-200/70' : 'bg-rose-200/70'} flex items-center justify-between gap-3 px-3 py-2`}>
+                <p className="min-w-0 truncate text-sm font-black underline">
+                  {ticket.fixtureLabel} - {ticket.marketTitle}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onDelete(ticket.id)}
+                  className="shrink-0 rounded p-1 text-red-500 transition hover:bg-white/45 hover:text-red-600"
+                  aria-label="Excluir cupom"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="grid gap-3 px-3 py-3 sm:grid-cols-[1fr_auto]">
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-700">{isBack ? 'Aposta a favor' : 'Aposta contra'}</p>
+                  <p className="truncate text-base font-black">{ticket.selectionLabel}</p>
+                  <p className="mt-2 text-xs text-slate-700">
+                    Bet Id: {ticket.id.slice(-8).toUpperCase()} | Colocada: {ticket.placedAt}
+                  </p>
+                  <p className="text-xs text-slate-700">Minuto do replay: {ticket.replayMinute}</p>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-right text-sm">
+                  <div>
+                    <p className="font-semibold text-slate-600">Odd</p>
+                    <p className="text-base font-black">{formatPlainOdd(ticket.odd)}</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-600">Stake</p>
+                    <p className="text-base font-black">{formatCurrency(ticket.stake)}</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-600">{isBack ? 'Lucro' : 'Respons.'}</p>
+                    <p className="text-base font-black">
+                      {isBack
+                        ? formatCurrency(ticket.stake * ((toValidOddNumber(ticket.odd) ?? 1) - 1))
+                        : formatCurrency(ticket.liability)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#11183f]/10 px-3 py-3">
+                <div className="text-sm font-semibold">
+                  {cashout ? (
+                    <>
+                      Cash Out {formatSignedCurrency(cashout.profit)}
+                      <span className="ml-2 text-slate-700">via odd {cashout.oppositeOdd.toString().replace('.', ',')}</span>
+                    </>
+                  ) : (
+                    <span className="text-slate-700">Cashout indisponivel neste snapshot</span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  className="min-h-9 bg-amber-400 px-3 py-1 text-[#11183f] hover:bg-amber-300"
+                  disabled={!cashout}
+                  onClick={() => cashout && onCashout(ticket, cashout)}
+                >
+                  Cash Out
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function OddsPanel({
+  markets,
+  onSelectQuote,
+}: {
+  markets: OddsDisplayMarket[];
+  onSelectQuote: (market: OddsDisplayMarket, selection: OddsDisplaySelection, side: BetSide, odd: string) => void;
+}) {
   const [expandedMarkets, setExpandedMarkets] = useState<string[]>([]);
-  const markets = getDisplayMarkets(snapshot, game).slice(0, 30);
 
   const toggleMarket = (marketKey: string) => {
     setExpandedMarkets((current) =>
@@ -456,6 +803,7 @@ function OddsPanel({ snapshot, game }: { snapshot?: ApiFootballReplaySnapshot; g
               market={market}
               collapsed={!expandedMarkets.includes(market.key)}
               onToggle={() => toggleMarket(market.key)}
+              onSelectQuote={(selection, side, odd) => onSelectQuote(market, selection, side, odd)}
             />
           );
         })}
@@ -588,6 +936,10 @@ export function ReplayPage({ delay }: ReplayPageProps) {
   const [selectedFixtureId, setSelectedFixtureId] = useState<number | undefined>();
   const [snapshotIndex, setSnapshotIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [selectedSlip, setSelectedSlip] = useState<BetSlipSelection | undefined>();
+  const [stakeValue, setStakeValue] = useState('10');
+  const [tickets, setTickets] = useState<BetTicket[]>([]);
+  const [lastCashout, setLastCashout] = useState<string | undefined>();
   const { data: games, loading, error } = useAsyncData(
     () => apiFootballService.buscarReplayGames(),
     [],
@@ -608,10 +960,16 @@ export function ReplayPage({ delay }: ReplayPageProps) {
     return playingSnapshots.length > 0 ? playingSnapshots : game.timeline;
   }, [game]);
   const snapshot = playableTimeline[snapshotIndex];
+  const currentMarkets = useMemo(() => getDisplayMarkets(snapshot, game).slice(0, 30), [game, snapshot]);
+  const fixtureLabel = `${game?.summary.homeTeam?.name ?? 'Mandante'} vs ${game?.summary.awayTeam?.name ?? 'Visitante'}`;
 
   useEffect(() => {
     setSnapshotIndex(0);
     setPlaying(false);
+    setSelectedSlip(undefined);
+    setStakeValue('10');
+    setTickets([]);
+    setLastCashout(undefined);
   }, [activeFixtureId]);
 
   useEffect(() => {
@@ -636,6 +994,53 @@ export function ReplayPage({ delay }: ReplayPageProps) {
     setSnapshotIndex(Math.max(0, playableTimeline.length - 1));
   }, [playableTimeline.length, snapshotIndex]);
 
+  const handleSelectQuote = (
+    market: OddsDisplayMarket,
+    selection: OddsDisplaySelection,
+    side: BetSide,
+    odd: string,
+  ) => {
+    setSelectedSlip({
+      marketKey: market.key,
+      marketTitle: market.title,
+      selectionKey: selection.key,
+      selectionLabel: selection.label,
+      side,
+      odd,
+    });
+    setStakeValue((current) => (parseStakeValue(current) > 0 ? current : '10'));
+  };
+
+  const handleConfirmBet = () => {
+    if (!selectedSlip) return;
+
+    const stake = parseStakeValue(stakeValue);
+    if (stake <= 0) return;
+
+    const ticket: BetTicket = {
+      ...selectedSlip,
+      id: uid('bet'),
+      fixtureLabel,
+      placedAt: new Date().toLocaleString('pt-BR'),
+      replayMinute: formatReplayMinute(snapshot),
+      stake,
+      liability: getTicketLiability(selectedSlip.side, selectedSlip.odd, stake),
+    };
+
+    setTickets((current) => [ticket, ...current]);
+    setSelectedSlip(undefined);
+    setLastCashout(undefined);
+  };
+
+  const handleCashout = (ticket: BetTicket, result: CashoutResult) => {
+    setTickets((current) => current.filter((item) => item.id !== ticket.id));
+    setLastCashout(`${ticket.selectionLabel}: cashout realizado em ${formatSignedCurrency(result.profit)}.`);
+  };
+
+  const handleDeleteTicket = (ticketId: string) => {
+    setTickets((current) => current.filter((item) => item.id !== ticketId));
+  };
+
   return (
     <>
       <PageHeader
@@ -658,27 +1063,49 @@ export function ReplayPage({ delay }: ReplayPageProps) {
             {gameError && !gameLoading && <EmptyState title="Nao foi possivel abrir a partida" description={gameError} />}
             {game && !gameLoading && (
               <>
-                <ReplayControls
-                  game={game}
-                  timeline={playableTimeline}
-                  snapshotIndex={Math.min(snapshotIndex, Math.max(0, playableTimeline.length - 1))}
-                  playing={playing}
-                  onIndex={setSnapshotIndex}
-                  onPlaying={setPlaying}
-                />
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
-                  <OddsPanel snapshot={snapshot} game={game} />
-                  <StatsPanel game={game} snapshot={snapshot} />
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+                  <ReplayControls
+                    game={game}
+                    timeline={playableTimeline}
+                    snapshotIndex={Math.min(snapshotIndex, Math.max(0, playableTimeline.length - 1))}
+                    playing={playing}
+                    onIndex={setSnapshotIndex}
+                    onPlaying={setPlaying}
+                  />
+                  <div className="space-y-5">
+                    <BetCouponsPanel
+                      tickets={tickets}
+                      markets={currentMarkets}
+                      lastCashout={lastCashout}
+                      onCashout={handleCashout}
+                      onDelete={handleDeleteTicket}
+                    />
+                    <BetSlipPanel
+                      selection={selectedSlip}
+                      stakeValue={stakeValue}
+                      onStakeValue={setStakeValue}
+                      onCancel={() => setSelectedSlip(undefined)}
+                      onConfirm={handleConfirmBet}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+                  <div className="min-w-0 space-y-5">
+                    <OddsPanel markets={currentMarkets} onSelectQuote={handleSelectQuote} />
+                    <ReplayGameSearch
+                      games={games ?? []}
+                      selectedFixtureId={activeFixtureId}
+                      query={query}
+                      onQuery={setQuery}
+                      onSelect={setSelectedFixtureId}
+                    />
+                  </div>
+                  <div className="space-y-5">
+                    <StatsPanel game={game} snapshot={snapshot} />
+                  </div>
                 </div>
               </>
             )}
-          <ReplayGameSearch
-            games={games ?? []}
-            selectedFixtureId={activeFixtureId}
-            query={query}
-            onQuery={setQuery}
-            onSelect={setSelectedFixtureId}
-          />
         </div>
       )}
     </>
