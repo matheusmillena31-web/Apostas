@@ -171,9 +171,13 @@ const getRecentStatValue = (game: Game, snapshot: GameSnapshot, snapshotIndex: n
   const previous = getSnapshotAtOrBeforeMinute(game, snapshot.minute - window, snapshotIndex);
   if (!previous) return undefined;
 
-  const currentValue = getTeamStatValue(snapshot, game, metric, reference);
-  const previousValue = getTeamStatValue(previous, game, metric, reference);
-  if (currentValue === undefined || previousValue === undefined) return undefined;
+  const currentValue = reference === 'total'
+    ? getTotalMetric(snapshot, metric)
+    : getTeamStatValue(snapshot, game, metric, reference);
+  const previousValue = reference === 'total'
+    ? getTotalMetric(previous, metric)
+    : getTeamStatValue(previous, game, metric, reference);
+  if (typeof currentValue !== 'number' || typeof previousValue !== 'number') return undefined;
 
   return Math.max(0, currentValue - previousValue);
 };

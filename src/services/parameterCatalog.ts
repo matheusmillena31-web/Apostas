@@ -63,8 +63,17 @@ const byReferenceOptions = statMetrics.flatMap(([metric, label, min, max, defaul
 );
 
 const recentOptions = recentMetrics.flatMap(([metric, label, min, max, defaultFrom, defaultTo]) =>
-  windows.flatMap((window) =>
-    references.map(([reference, referenceLabel]) => ({
+  windows.flatMap((window) => [
+    {
+      value: `recent:${metric}:${window}:total`,
+      label: `${label} ultimos ${window}' - Total`,
+      category: 'Estatisticas totais',
+      min,
+      max,
+      defaultFrom,
+      defaultTo,
+    },
+    ...references.map(([reference, referenceLabel]) => ({
       value: `recent:${metric}:${window}:${reference}`,
       label: `${label} ultimos ${window}' - ${referenceLabel}`,
       category: 'Estatisticas recentes',
@@ -73,7 +82,7 @@ const recentOptions = recentMetrics.flatMap(([metric, label, min, max, defaultFr
       defaultFrom,
       defaultTo,
     })),
-  ),
+  ]),
 );
 
 const diffOptions = [
