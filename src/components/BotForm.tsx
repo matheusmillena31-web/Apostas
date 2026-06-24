@@ -56,7 +56,7 @@ const oddMarkets = [
 
 const markets = ['', ...goalMarkets, 'Ambas Marcam', 'Match Odds', 'Empate'];
 
-const mainLeagues = [
+const leagueSuggestions = [
   'Brasil: Serie A',
   'Brasil: Serie B',
   'Brasil: Copa do Brasil',
@@ -770,11 +770,18 @@ function LeagueSelector({
   onChange: (leagues: string[]) => void;
 }) {
   const [query, setQuery] = useState('');
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredLeagues = mainLeagues.filter((league) => league.toLowerCase().includes(normalizedQuery));
+  const typedLeague = query.trim();
+  const normalizedQuery = typedLeague.toLowerCase();
+  const selectedNormalized = selected.map((league) => league.trim().toLowerCase());
+  const filteredLeagues = leagueSuggestions
+    .filter((league) => league.toLowerCase().includes(normalizedQuery))
+    .filter((league) => !selectedNormalized.includes(league.toLowerCase()));
+  const canAddTypedLeague = typedLeague.length > 0 && !selectedNormalized.includes(normalizedQuery);
 
   const addLeague = (league: string) => {
-    if (!selected.includes(league)) onChange([...selected, league]);
+    const normalizedLeague = league.trim();
+    if (!normalizedLeague) return;
+    if (!selectedNormalized.includes(normalizedLeague.toLowerCase())) onChange([...selected, normalizedLeague]);
     setQuery('');
   };
 
@@ -808,11 +815,26 @@ function LeagueSelector({
       <input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="Buscar liga"
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            addLeague(typedLeague);
+          }
+        }}
+        placeholder="Digite qualquer liga suportada pela API"
         className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
       />
 
       <div className="mt-3 max-h-48 overflow-y-auto rounded-md border border-white/10 bg-ink-950">
+        {canAddTypedLeague && (
+          <button
+            type="button"
+            onClick={() => addLeague(typedLeague)}
+            className="block w-full border-b border-white/8 px-3 py-2 text-left text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/10 hover:text-emerald-200"
+          >
+            Adicionar "{typedLeague}"
+          </button>
+        )}
         {filteredLeagues.map((league) => (
           <button
             key={league}
@@ -825,7 +847,7 @@ function LeagueSelector({
             {league}
           </button>
         ))}
-        {filteredLeagues.length === 0 && <p className="px-3 py-3 text-sm text-slate-500">Nenhuma liga encontrada.</p>}
+        {filteredLeagues.length === 0 && !canAddTypedLeague && <p className="px-3 py-3 text-sm text-slate-500">Digite uma liga para adicionar.</p>}
       </div>
     </div>
   );
@@ -1042,7 +1064,7 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       </div>
 
       <section className="space-y-5">
-        <h2 className="text-xl font-semibold text-white">1o passo: escolha dos parametros gerais</h2>
+        <h2 className="text-xl font-semibold text-white">Passo 1: escolha dos parametros gerais</h2>
         {activeRules.map((rule, index) => (
           rule.mode === 'pre-live' ? (
             <PreLiveRuleCard
@@ -1074,7 +1096,7 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
 
       <section className="space-y-5">
         <h2 className="text-xl font-semibold text-white">
-          2o passo: escolha um mercado (opcional) e filtre a odd {bot.mode === 'live' ? 'live' : 'pre-live'} (opcional)
+          Passo 2: escolha um mercado (opcional) e filtre a odd {bot.mode === 'live' ? 'live' : 'pre-live'} (opcional)
         </h2>
         <OddRangeCard
           mode={bot.mode}
@@ -1087,7 +1109,7 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       </section>
 
       <section className="space-y-5">
-        <h2 className="text-xl font-semibold text-white">3o passo: filtro por liga (opcional)</h2>
+        <h2 className="text-xl font-semibold text-white">Passo 3: filtro por liga (opcional)</h2>
         <div className="grid gap-4 rounded-lg border border-violet-500/80 bg-ink-850/95 p-5 shadow-glow lg:grid-cols-2">
           <LeagueSelector
             title="Inserir ligas selecionadas"
@@ -1103,7 +1125,7 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       </section>
 
       <section className="space-y-5">
-        <h2 className="text-xl font-semibold text-white">4o passo: situacao de jogo (opcional)</h2>
+        <h2 className="text-xl font-semibold text-white">Passo 4: situacao de jogo (opcional)</h2>
         <GameSituationCard
           roleRule={gameSituationRoleRule}
           metricRule={gameSituationMetricRule}
@@ -1115,7 +1137,7 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       </section>
 
       <section className="space-y-5">
-        <h2 className="text-xl font-semibold text-white">5o passo: Cashout / Saida da operacao</h2>
+        <h2 className="text-xl font-semibold text-white">Passo 5: Cashout / Saida da operacao</h2>
         <div className="rounded-lg border border-violet-500/80 bg-ink-850/95 p-5 shadow-glow">
           <label className="flex items-center gap-3 text-sm font-semibold text-slate-300">
             <input
