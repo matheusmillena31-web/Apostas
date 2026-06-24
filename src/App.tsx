@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { runBacktest } from './services/backtest';
@@ -55,7 +55,9 @@ export default function App() {
   const [settings] = useState(() => storage.getSettings());
   const [editingBot, setEditingBot] = useState<Bot | undefined>();
   const [botEditorOpen, setBotEditorOpen] = useState(false);
-  const [historicalGames, setHistoricalGames] = useState<Game[]>([]);
+  const historicalGamesRef = useRef<Game[]>([]);
+  const historicalGamesPromiseRef = useRef<Promise<Game[]> | undefined>(undefined);
+  const processingJobIdRef = useRef<string | undefined>(undefined);
 
   const rankings = useMemo(
     () =>
@@ -119,10 +121,19 @@ export default function App() {
   };
 
   const getHistoricalGames = async () => {
-    if (historicalGames.length > 0) return historicalGames;
-    const games = await loadHistoricalBacktestGames();
-    setHistoricalGames(games);
-    return games;
+    if (historicalGamesRef.current.length > 0) return historicalGamesRef.current;
+    if (!historicalGamesPromiseRef.current) {
+      historicalGamesPromiseRef.current = loadHistoricalBacktestGames()
+        .then((games) => {
+          historicalGamesRef.current = games;
+          return games;
+        })
+        .catch((error) => {
+          historicalGamesPromiseRef.current = undefined;
+          throw error;
+        });
+    }
+    return historicalGamesPromiseRef.current;
   };
 
   const runBotBacktest = (bot: Bot) => {
@@ -144,23 +155,21 @@ export default function App() {
       return new Date(job.scheduledFor).getTime() <= Date.now();
     });
 
-    if (!nextJob || backtestJobs.some((job) => job.status === 'processing')) return;
+    if (!nextJob || processingJobIdRef.current || backtestJobs.some((job) => job.status === 'processing')) return;
 
-    let cancelled = false;
+    processingJobIdRef.current = nextJob.id;
     const startedAt = new Date().toISOString();
     setBacktestJobs(storage.updateBacktestJob(nextJob.id, { status: 'processing', startedAt, progress: 10 }));
 
     const processJob = async () => {
       try {
         const games = await getHistoricalGames();
-        if (cancelled) return;
         setBacktestJobs(storage.updateBacktestJob(nextJob.id, { progress: 55 }));
 
         const output = runBacktest(nextJob.botSnapshot, games);
-        if (cancelled) return;
 
         saveBacktest(output.result, output.logs);
-        setBacktestJobs(storage.updateBacktestJob(nextJob.id, {
+        const completedJobs = storage.updateBacktestJob(nextJob.id, {
           status: 'completed',
           finishedAt: new Date().toISOString(),
           progress: 100,
@@ -171,24 +180,23 @@ export default function App() {
           accuracy: output.result.totalEntries > 0 ? Number(((output.result.greens / output.result.totalEntries) * 100).toFixed(2)) : 0,
           profit: output.result.profit,
           roi: output.result.roi,
-        }));
+        });
+        processingJobIdRef.current = undefined;
+        setBacktestJobs(completedJobs);
       } catch (error) {
-        if (cancelled) return;
-        setBacktestJobs(storage.updateBacktestJob(nextJob.id, {
+        const errorJobs = storage.updateBacktestJob(nextJob.id, {
           status: 'error',
           finishedAt: new Date().toISOString(),
           progress: 100,
           errorMessage: error instanceof Error ? error.message : 'Nao foi possivel processar o backtest.',
-        }));
+        });
+        processingJobIdRef.current = undefined;
+        setBacktestJobs(errorJobs);
       }
     };
 
     processJob();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [backtestJobs, historicalGames]);
+  }, [backtestJobs]);
 
   const content = (() => {
     switch (page) {

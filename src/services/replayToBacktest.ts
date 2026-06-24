@@ -5,6 +5,7 @@ import { ApiFootballOddsBet, ApiFootballReplayGame, ApiFootballReplaySnapshot } 
 
 const FALLBACK_ODD = 1.01;
 const MAX_REPLAY_GAMES = 200;
+const REPLAY_GAME_CONCURRENCY = 8;
 
 const normalizeText = (value: unknown) =>
   String(value ?? '')
@@ -220,10 +221,15 @@ export const loadHistoricalBacktestGames = async (limit = MAX_REPLAY_GAMES): Pro
   const selectedSummaries = summaries.slice(0, limit);
   const games: Game[] = [];
 
-  for (const summary of selectedSummaries) {
-    const replayGame = await apiFootballService.buscarReplayGame(summary.fixtureId);
-    const game = convertReplayGameToBacktestGame(replayGame);
-    if (game) games.push(game);
+  for (let index = 0; index < selectedSummaries.length; index += REPLAY_GAME_CONCURRENCY) {
+    const batch = selectedSummaries.slice(index, index + REPLAY_GAME_CONCURRENCY);
+    const convertedGames = await Promise.all(
+      batch.map(async (summary) => {
+        const replayGame = await apiFootballService.buscarReplayGame(summary.fixtureId);
+        return convertReplayGameToBacktestGame(replayGame);
+      }),
+    );
+    games.push(...convertedGames.filter((game): game is Game => Boolean(game)));
   }
 
   return enrichGamesWithHistoricalPreLiveStats(games);
