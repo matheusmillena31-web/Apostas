@@ -256,6 +256,33 @@ export interface BacktestResult {
   worstLeague: string;
 }
 
+export type BacktestJobStatus = 'pending' | 'processing' | 'completed' | 'error' | 'cancelled';
+
+export interface BacktestJob {
+  id: string;
+  botId: string;
+  botSnapshot: Bot;
+  name: string;
+  createdBy: string;
+  type: 'Pre-Live' | 'Live';
+  market?: string;
+  parametersSummary: string;
+  status: BacktestJobStatus;
+  createdAt: string;
+  scheduledFor?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  progress?: number;
+  resultId?: string;
+  result?: BacktestResult;
+  logs?: BotLog[];
+  errorMessage?: string;
+  entries?: number;
+  accuracy?: number;
+  profit?: number;
+  roi?: number;
+}
+
 export interface BotLog {
   id: string;
   date: string;

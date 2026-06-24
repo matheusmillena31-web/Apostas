@@ -1,10 +1,11 @@
-import { AppSettings, Bot, BotLog, BacktestResult } from '../types';
+import { AppSettings, Bot, BotLog, BacktestJob, BacktestResult } from '../types';
 import { uid } from '../utils/formatters';
 
 const keys = {
   bots: 'tradelab:bots',
   logs: 'tradelab:logs',
   results: 'tradelab:results',
+  backtestJobs: 'tradelab:backtestJobs',
   settings: 'tradelab:settings',
 };
 
@@ -110,6 +111,115 @@ const normalizeBot = (payload: unknown): Bot => {
   };
 };
 
+const cloneBot = (bot: Bot): Bot => JSON.parse(JSON.stringify(bot)) as Bot;
+
+const getAccuracy = (result?: BacktestResult) =>
+  result && result.totalEntries > 0 ? Number(((result.greens / result.totalEntries) * 100).toFixed(2)) : undefined;
+
+const summarizeParameters = (bot: Bot) => {
+  const rules = bot.rules?.filter((rule) => rule.parameter).length ?? 0;
+  const cashOutRules = bot.cashOut?.exitRules?.filter((rule) => rule.parameter).length ?? 0;
+  return `${rules} regra(s) de entrada${cashOutRules ? `, ${cashOutRules} regra(s) de cashout` : ''}`;
+};
+
+const buildJobFromResult = (result: BacktestResult): BacktestJob => {
+  const now = new Date().toISOString();
+  const botSnapshot: Bot = {
+    id: result.botId,
+    name: result.botName,
+    description: 'Resultado antigo migrado',
+    isActive: true,
+    mode: 'live',
+    sport: 'Futebol',
+    market: undefined,
+    operation: 'BACK',
+    stake: 1,
+    rules: [],
+    includedLeagues: [],
+    excludedLeagues: [],
+    cashOut: { enabled: false, exitLogic: 'AND', exitRules: [] },
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  return {
+    id: uid('job'),
+    botId: result.botId,
+    botSnapshot,
+    name: result.botName,
+    createdBy: 'Eu',
+    type: 'Live',
+    market: undefined,
+    parametersSummary: 'Resultado antigo',
+    status: 'completed',
+    createdAt: now,
+    scheduledFor: now,
+    startedAt: now,
+    finishedAt: now,
+    progress: 100,
+    resultId: result.botId,
+    result,
+    entries: result.totalEntries,
+    accuracy: getAccuracy(result),
+    profit: result.profit,
+    roi: result.roi,
+  };
+};
+
+const normalizeBacktestJob = (payload: unknown): BacktestJob => {
+  const item = payload as Partial<BacktestJob> & Record<string, any>;
+  const botSnapshot = normalizeBot(item.botSnapshot ?? {});
+  const now = new Date().toISOString();
+  const result = item.result as BacktestResult | undefined;
+  const status = ['pending', 'processing', 'completed', 'error', 'cancelled'].includes(String(item.status))
+    ? (item.status as BacktestJob['status'])
+    : 'pending';
+
+  return {
+    id: String(item.id ?? uid('job')),
+    botId: String(item.botId ?? botSnapshot.id),
+    botSnapshot,
+    name: String(item.name ?? botSnapshot.name ?? 'Backtest sem nome'),
+    createdBy: String(item.createdBy ?? 'Eu'),
+    type: item.type === 'Pre-Live' ? 'Pre-Live' : 'Live',
+    market: item.market ?? botSnapshot.market ?? botSnapshot.oddMarket,
+    parametersSummary: String(item.parametersSummary ?? summarizeParameters(botSnapshot)),
+    status,
+    createdAt: String(item.createdAt ?? now),
+    scheduledFor: item.scheduledFor ? String(item.scheduledFor) : undefined,
+    startedAt: item.startedAt ? String(item.startedAt) : undefined,
+    finishedAt: item.finishedAt ? String(item.finishedAt) : undefined,
+    progress: typeof item.progress === 'number' ? item.progress : undefined,
+    resultId: item.resultId ? String(item.resultId) : undefined,
+    result,
+    logs: Array.isArray(item.logs) ? item.logs : undefined,
+    errorMessage: item.errorMessage ? String(item.errorMessage) : undefined,
+    entries: typeof item.entries === 'number' ? item.entries : result?.totalEntries,
+    accuracy: typeof item.accuracy === 'number' ? item.accuracy : getAccuracy(result),
+    profit: typeof item.profit === 'number' ? item.profit : result?.profit,
+    roi: typeof item.roi === 'number' ? item.roi : result?.roi,
+  };
+};
+
+const createBacktestJobFromBot = (bot: Bot, scheduledFor?: string): BacktestJob => {
+  const now = new Date().toISOString();
+  const botSnapshot = cloneBot(bot);
+  return {
+    id: uid('job'),
+    botId: bot.id,
+    botSnapshot,
+    name: `${bot.name || 'Bot sem nome'} - ${new Date(now).toLocaleString('pt-BR')}`,
+    createdBy: 'Eu',
+    type: bot.mode === 'pre-live' ? 'Pre-Live' : 'Live',
+    market: bot.market ?? bot.oddMarket,
+    parametersSummary: summarizeParameters(bot),
+    status: 'pending',
+    createdAt: now,
+    scheduledFor: scheduledFor ?? now,
+    progress: 0,
+  };
+};
+
 export const storage = {
   getBots: () => read<unknown[]>(keys.bots, []).map(normalizeBot),
   saveBots: (bots: Bot[]) => write(keys.bots, bots),
@@ -135,23 +245,58 @@ export const storage = {
   getResults: () => read<BacktestResult[]>(keys.results, []),
   saveResults: (results: BacktestResult[]) => write(keys.results, results),
   saveResult: (result: BacktestResult) => {
-    const others = storage.getResults().filter((item) => item.botId !== result.botId);
-    const next = [result, ...others];
+    const next = [result, ...storage.getResults()];
     write(keys.results, next);
     return next;
   },
+  getBacktestJobs: () => {
+    const hasStoredJobs = localStorage.getItem(keys.backtestJobs) !== null;
+    const jobs = read<unknown[]>(keys.backtestJobs, []).map(normalizeBacktestJob);
+    if (hasStoredJobs) return jobs;
+
+    const legacyResults = storage.getResults();
+    if (legacyResults.length === 0) return [];
+
+    const migratedJobs = legacyResults.map(buildJobFromResult);
+    write(keys.backtestJobs, migratedJobs);
+    return migratedJobs;
+  },
+  saveBacktestJobs: (jobs: BacktestJob[]) => write(keys.backtestJobs, jobs),
+  createBacktestJob: (bot: Bot, scheduledFor?: string) => {
+    const job = createBacktestJobFromBot(bot, scheduledFor);
+    const jobs = [job, ...storage.getBacktestJobs()];
+    storage.saveBacktestJobs(jobs);
+    return { job, jobs };
+  },
+  updateBacktestJob: (jobId: string, patch: Partial<BacktestJob>) => {
+    const jobs = storage.getBacktestJobs().map((job) => (job.id === jobId ? { ...job, ...patch } : job));
+    storage.saveBacktestJobs(jobs);
+    return jobs;
+  },
+  deleteBacktestJob: (jobId: string) => {
+    const jobs = storage.getBacktestJobs().filter((job) => job.id !== jobId);
+    storage.saveBacktestJobs(jobs);
+    return jobs;
+  },
+  deleteAllBacktestJobs: () => {
+    storage.saveBacktestJobs([]);
+    return [];
+  },
+  getBacktestJobById: (jobId: string) => storage.getBacktestJobs().find((job) => job.id === jobId),
   getSettings: () => read<AppSettings>(keys.settings, defaultSettings),
   saveSettings: (settings: AppSettings) => write(keys.settings, settings),
   exportAll: () => ({
     bots: storage.getBots(),
     logs: storage.getLogs(),
     results: storage.getResults(),
+    backtestJobs: storage.getBacktestJobs(),
     settings: storage.getSettings(),
   }),
-  importAll: (payload: Partial<{ bots: Bot[]; logs: BotLog[]; results: BacktestResult[]; settings: AppSettings }>) => {
+  importAll: (payload: Partial<{ bots: Bot[]; logs: BotLog[]; results: BacktestResult[]; backtestJobs: BacktestJob[]; settings: AppSettings }>) => {
     if (payload.bots) storage.saveBots(payload.bots);
     if (payload.logs) storage.saveLogs(payload.logs);
     if (payload.results) write(keys.results, payload.results);
+    if (payload.backtestJobs) storage.saveBacktestJobs(payload.backtestJobs);
     if (payload.settings) storage.saveSettings(payload.settings);
   },
   clearAll: () => Object.values(keys).forEach((key) => localStorage.removeItem(key)),

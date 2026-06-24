@@ -1,457 +1,421 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CheckSquare, HelpCircle, Play, Recycle, X } from 'lucide-react';
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { useMemo, useState } from 'react';
+import { AlertTriangle, ArrowLeft, Ban, CheckCircle2, Clock, Eye, Loader2, Lock, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { StatCard } from '../components/StatCard';
-import { runBacktest } from '../services/backtest';
-import { loadHistoricalBacktestGames } from '../services/replayToBacktest';
-import { BacktestResult, Bot, BotLog, Game, TradeEntry } from '../types';
+import { BacktestJob, BacktestJobStatus, Bot, BotLog, BotRule, TradeEntry } from '../types';
 import { formatCurrency, formatNumber, formatPercent } from '../utils/formatters';
 
 type BacktestPageProps = {
-  bots: Bot[];
-  selectedBot?: Bot;
-  initialResult?: BacktestResult;
-  historicalGames: Game[];
-  onHistoricalGamesLoaded: (games: Game[]) => void;
-  onResult: (result: BacktestResult, logs: BotLog[]) => void;
+  jobs: BacktestJob[];
+  onDeleteJob: (jobId: string) => void;
+  onDeleteAllJobs: () => void;
+  onCancelJob: (jobId: string) => void;
 };
 
-type BankrollPoint = {
-  date: string;
-  banca: number;
-  lucro: number;
+type SortKey = 'name' | 'type' | 'market' | 'accuracy' | 'entries' | 'profit' | 'createdAt' | 'scheduledFor' | 'status';
+
+const PAGE_SIZE = 10;
+const MAX_PENDING_JOBS = 10;
+
+const statusLabels: Record<BacktestJobStatus, string> = {
+  pending: 'Aguardando',
+  processing: 'Processando',
+  completed: 'Processado',
+  error: 'Erro',
+  cancelled: 'Cancelado',
 };
 
-type RunStats = {
-  count: number;
-  profit: number;
-  stake: number;
-  startIndex: number;
-  endIndex: number;
-};
-
-const chartTooltipStyle = {
-  background: '#101620',
-  border: '1px solid rgba(255,255,255,.1)',
-  borderRadius: '8px',
-  color: '#e2e8f0',
-};
-
-const formatShortDate = (date: Date) =>
-  new Intl.DateTimeFormat('pt-BR', {
+const formatDateTime = (value?: string) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
     month: '2-digit',
     year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(date);
-
-const formatRunDate = (date: Date) =>
-  new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: '2-digit',
-  })
-    .format(date)
-    .replace(/\//g, '-');
-
-const getSimulatedDate = (entriesCount: number, index: number) => {
-  const date = new Date();
-  date.setDate(date.getDate() - entriesCount + index);
-  return date;
 };
 
-const buildBankrollData = (entries: TradeEntry[]): BankrollPoint[] => {
-  const baseDate = new Date();
-  baseDate.setDate(baseDate.getDate() - entries.length);
-
-  let currentBankroll = 0;
-  const initialDate = new Date(baseDate);
-
-  const data: BankrollPoint[] = [
-    {
-      date: formatShortDate(initialDate),
-      banca: Number(currentBankroll.toFixed(2)),
-      lucro: 0,
-    },
-  ];
-
-  entries.forEach((entry, index) => {
-    const pointDate = new Date(baseDate);
-    pointDate.setDate(baseDate.getDate() + index + 1);
-    currentBankroll += entry.profit;
-    data.push({
-      date: formatShortDate(pointDate),
-      banca: Number(currentBankroll.toFixed(2)),
-      lucro: Number(entry.profit.toFixed(2)),
-    });
-  });
-
-  return data;
+const getAccuracy = (job: BacktestJob) => {
+  if (typeof job.accuracy === 'number') return job.accuracy;
+  if (!job.result || job.result.totalEntries === 0) return undefined;
+  return (job.result.greens / job.result.totalEntries) * 100;
 };
 
-const runRoi = (run: RunStats) => (run.stake > 0 ? (run.profit / run.stake) * 100 : 0);
+const getEntries = (job: BacktestJob) => job.entries ?? job.result?.totalEntries;
+const getProfit = (job: BacktestJob) => job.profit ?? job.result?.profit;
+const getRoi = (job: BacktestJob) => job.roi ?? job.result?.roi;
 
-const emptyRun = (): RunStats => ({
-  count: 0,
-  profit: 0,
-  stake: 0,
-  startIndex: -1,
-  endIndex: -1,
-});
-
-const getRunRange = (run: RunStats, totalEntries: number) => {
-  if (run.startIndex < 0 || run.endIndex < 0) return '-';
-  return `${formatRunDate(getSimulatedDate(totalEntries, run.startIndex + 1))}/${formatRunDate(getSimulatedDate(totalEntries, run.endIndex + 1))}`;
+const statusTone = (status: BacktestJobStatus) => {
+  if (status === 'completed') return 'bg-emerald-500/12 text-emerald-300';
+  if (status === 'processing') return 'bg-blue-500/12 text-blue-300';
+  if (status === 'pending') return 'bg-amber-500/12 text-amber-300';
+  if (status === 'error') return 'bg-red-500/12 text-red-300';
+  return 'bg-slate-500/12 text-slate-400';
 };
 
-const normalCdf = (value: number) => {
-  const sign = value < 0 ? -1 : 1;
-  const x = Math.abs(value) / Math.sqrt(2);
-  const t = 1 / (1 + 0.3275911 * x);
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const erf = sign * (1 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x)));
-  return 0.5 * (1 + erf);
-};
+function StatusPill({ status }: { status: BacktestJobStatus }) {
+  const icon = {
+    pending: <Clock className="h-3.5 w-3.5" />,
+    processing: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    completed: <CheckCircle2 className="h-3.5 w-3.5" />,
+    error: <AlertTriangle className="h-3.5 w-3.5" />,
+    cancelled: <Ban className="h-3.5 w-3.5" />,
+  }[status];
 
-const buildAdvancedStats = (entries: TradeEntry[]) => {
-  const total = entries.length;
-  const greens = entries.filter((entry) => entry.result === 'green');
-  const reds = entries.filter((entry) => entry.result === 'red');
-  const totalStake = entries.reduce((sum, entry) => sum + entry.stake, 0);
-  const months = Math.max(1, Math.ceil(Math.max(1, total) / 30));
-  const days = Math.max(1, total);
-  const accuracy = total > 0 ? (greens.length / total) * 100 : 0;
-  const averageOdd = total > 0 ? entries.reduce((sum, entry) => sum + entry.odd, 0) / total : 0;
-  const averageGreenOdd = greens.length > 0 ? greens.reduce((sum, entry) => sum + entry.odd, 0) / greens.length : 0;
-
-  let currentRun = emptyRun();
-  let currentType: TradeEntry['result'] | undefined;
-  let bestGoodRun = emptyRun();
-  let worstBadRun = emptyRun();
-  let cumulative = 0;
-  let peak = 0;
-  let maxDrawdown = 0;
-
-  entries.forEach((entry, index) => {
-    cumulative += entry.profit;
-    peak = Math.max(peak, cumulative);
-    maxDrawdown = Math.min(maxDrawdown, cumulative - peak);
-
-    if (entry.result !== currentType) {
-      currentType = entry.result;
-      currentRun = {
-        count: 0,
-        profit: 0,
-        stake: 0,
-        startIndex: index,
-        endIndex: index,
-      };
-    }
-
-    currentRun = {
-      ...currentRun,
-      count: currentRun.count + 1,
-      profit: currentRun.profit + entry.profit,
-      stake: currentRun.stake + entry.stake,
-      endIndex: index,
-    };
-
-    if (entry.result === 'green') {
-      const currentRoi = runRoi(currentRun);
-      const bestRoi = runRoi(bestGoodRun);
-      if (currentRun.count > bestGoodRun.count || (currentRun.count === bestGoodRun.count && currentRoi > bestRoi)) {
-        bestGoodRun = currentRun;
-      }
-    }
-
-    if (entry.result === 'red') {
-      const currentRoi = runRoi(currentRun);
-      const worstRoi = runRoi(worstBadRun);
-      if (currentRun.count > worstBadRun.count || (currentRun.count === worstBadRun.count && currentRoi < worstRoi)) {
-        worstBadRun = currentRun;
-      }
-    }
-  });
-
-  const expectedGreens = total * 0.5;
-  const standardDeviation = Math.sqrt(total * 0.25);
-  const zScore = standardDeviation > 0 ? Math.abs(greens.length - expectedGreens) / standardDeviation : 0;
-  const pValue = total > 0 ? Math.max(0, Math.min(1, 2 * (1 - normalCdf(zScore)))) * 100 : 0;
-
-  return {
-    bestGoodRun,
-    worstBadRun,
-    countPerMonth: total / months,
-    countPerDay: total / days,
-    months,
-    accuracy,
-    averageOdd,
-    averageGreenOdd,
-    maxDrawdownPercent: totalStake > 0 ? (maxDrawdown / totalStake) * 100 : 0,
-    pValue,
-    greens: greens.length,
-    reds: reds.length,
-    voids: 0,
-    total,
-  };
-};
-
-const formatSignedPercent = (value: number, digits = 4) =>
-  `${value >= 0 ? '' : '-'}${Math.abs(value).toFixed(digits)}%`;
-
-function StatRow({ label, value, tone }: { label: string; value: React.ReactNode; tone?: 'green' | 'red' }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-white/8 py-3 last:border-b-0">
-      <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
-        <span>{label}</span>
-        <HelpCircle className="h-4 w-4 text-slate-500" />
-      </div>
-      <div className={`text-right text-base font-semibold ${tone === 'green' ? 'text-emerald-300' : tone === 'red' ? 'text-red-300' : 'text-white'}`}>
-        {value}
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone(status)}`}>
+      {icon}
+      {statusLabels[status]}
+    </span>
+  );
+}
+
+const ruleText = (rule: BotRule) => {
+  const value = rule.operator === 'between' ? `${rule.value} e ${rule.secondValue}` : rule.value;
+  return `${rule.connector ?? 'AND'} ${rule.parameter} ${rule.operator === 'between' ? 'entre' : rule.operator} ${value}`;
+};
+
+function SortButton({ label, sortKey, activeKey, direction, onSort }: { label: string; sortKey: SortKey; activeKey: SortKey; direction: 'asc' | 'desc'; onSort: (key: SortKey) => void }) {
+  return (
+    <button type="button" onClick={() => onSort(sortKey)} className="inline-flex items-center gap-1 text-left uppercase tracking-[0.12em] text-slate-500 transition hover:text-slate-300">
+      {label}
+      {activeKey === sortKey && <span>{direction === 'asc' ? '↑' : '↓'}</span>}
+    </button>
+  );
+}
+
+function ParametersModal({ job, onClose }: { job: BacktestJob; onClose: () => void }) {
+  const bot = job.botSnapshot;
+  const entryRules = bot.rules.filter((rule) => rule.parameter);
+  const cashOutRules = bot.cashOut?.exitRules?.filter((rule) => rule.parameter) ?? [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8">
+      <div className="max-h-full w-full max-w-3xl overflow-y-auto rounded-lg border border-white/10 bg-ink-900 p-5 shadow-glow">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-semibold text-white">Parametros do chamado</h3>
+            <p className="mt-1 text-sm text-slate-400">Snapshot salvo em {formatDateTime(job.createdAt)}. Alteracoes atuais no bot nao afetam este relatorio.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md border border-white/10 p-2 text-slate-300 hover:text-white">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="grid gap-3 text-sm md:grid-cols-2">
+          <p><span className="text-slate-500">Nome:</span> <span className="text-white">{bot.name}</span></p>
+          <p><span className="text-slate-500">Modo:</span> <span className="text-white">{job.type}</span></p>
+          <p><span className="text-slate-500">Mercado:</span> <span className="text-white">{bot.market ?? bot.oddMarket ?? '-'}</span></p>
+          <p><span className="text-slate-500">Odd:</span> <span className="text-white">{bot.minOdd ?? '-'} ate {bot.maxOdd ?? '-'}</span></p>
+          <p><span className="text-slate-500">Ligas incluidas:</span> <span className="text-white">{bot.includedLeagues?.join(', ') || '-'}</span></p>
+          <p><span className="text-slate-500">Ligas excluidas:</span> <span className="text-white">{bot.excludedLeagues?.join(', ') || '-'}</span></p>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div className="rounded-lg border border-white/8 bg-ink-950/70 p-4">
+            <h4 className="mb-3 font-semibold text-white">Regras de entrada</h4>
+            {entryRules.length === 0 ? <p className="text-sm text-slate-500">Sem regras.</p> : entryRules.map((rule) => <p key={rule.id} className="mb-2 text-sm text-slate-300">{ruleText(rule)}</p>)}
+          </div>
+          <div className="rounded-lg border border-white/8 bg-ink-950/70 p-4">
+            <h4 className="mb-3 font-semibold text-white">Regras de cashout</h4>
+            {cashOutRules.length === 0 ? <p className="text-sm text-slate-500">Sem regras.</p> : cashOutRules.map((rule) => <p key={rule.id} className="mb-2 text-sm text-slate-300">{ruleText(rule)}</p>)}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function AdvancedStats({ entries }: { entries: TradeEntry[] }) {
-  const stats = useMemo(() => buildAdvancedStats(entries), [entries]);
-
+function ErrorModal({ job, onClose }: { job: BacktestJob; onClose: () => void }) {
   return (
-    <Card title="Estatisticas avancadas" subtitle="Resumo de sequencias, frequencia, assertividade e risco do backtest.">
-      <div className="grid gap-x-8 lg:grid-cols-2">
-        <div>
-          <StatRow label="Melhor good run - Contagem" value={stats.bestGoodRun.count} />
-          <StatRow label="Melhor good run - Lucro" value={formatSignedPercent(runRoi(stats.bestGoodRun), 4)} tone="green" />
-          <StatRow label="Melhor good run - De/Ate" value={getRunRange(stats.bestGoodRun, stats.total)} />
-          <StatRow label="Pior bad run - Contagem" value={stats.worstBadRun.count} />
-          <StatRow label="Pior bad run - Perda" value={formatSignedPercent(runRoi(stats.worstBadRun), 4)} tone="red" />
-          <StatRow label="Pior bad run - De/Ate" value={getRunRange(stats.worstBadRun, stats.total)} />
-          <StatRow label="Contagem" value={stats.total} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <div className="w-full max-w-xl rounded-lg border border-red-500/50 bg-ink-900 p-5 shadow-glow">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-semibold text-red-300">Erro no relatorio</h3>
+            <p className="mt-1 text-sm text-slate-400">{job.name}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md border border-white/10 p-2 text-slate-300 hover:text-white">
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <div>
-          <StatRow
-            label="Resultado"
-            value={
-              <span className="inline-flex items-center gap-2">
-                <CheckSquare className="h-4 w-4 text-emerald-300" />
-                {stats.greens}
-                <span>-</span>
-                <Recycle className="h-4 w-4 text-slate-400" />
-                {stats.voids}
-                <span>-</span>
-                <X className="h-4 w-4 text-red-300" />
-                {stats.reds}
-              </span>
-            }
-          />
-          <StatRow label="Contagem/mes" value={formatNumber(stats.countPerMonth, 2)} />
-          <StatRow label="Contagem/dia" value={formatNumber(stats.countPerDay, 2)} />
-          <StatRow label="Meses" value={stats.months} />
-          <StatRow label="Assertividade" value={formatSignedPercent(stats.accuracy, 2)} />
-          <StatRow label="Odd media" value={formatNumber(stats.averageOdd, 4)} />
-          <StatRow label="Odd media (greens)" value={formatNumber(stats.averageGreenOdd, 4)} />
-          <StatRow label="Drawdown max." value={formatSignedPercent(stats.maxDrawdownPercent, 4)} tone="red" />
-          <StatRow label="P-valor" value={formatSignedPercent(stats.pValue, 4)} tone="green" />
-        </div>
+        <p className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{job.errorMessage ?? 'Erro desconhecido.'}</p>
+      </div>
+    </div>
+  );
+}
+
+function EntryTable({ entries }: { entries: TradeEntry[] }) {
+  return (
+    <div className="table-scroll">
+      <table className="min-w-[1120px] w-full text-left text-sm">
+        <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
+          <tr>
+            <th className="px-3 py-3">Jogo</th>
+            <th className="px-3 py-3">Liga</th>
+            <th className="px-3 py-3">Entrada</th>
+            <th className="px-3 py-3">Saida</th>
+            <th className="px-3 py-3">Mercado</th>
+            <th className="px-3 py-3">Odds</th>
+            <th className="px-3 py-3">Placar</th>
+            <th className="px-3 py-3">Resultado</th>
+            <th className="px-3 py-3">Lucro</th>
+            <th className="px-3 py-3">Motivo</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/8">
+          {entries.map((entry) => (
+            <tr key={entry.id}>
+              <td className="px-3 py-4 text-white">{entry.game}</td>
+              <td className="px-3 py-4 text-slate-300">{entry.league}</td>
+              <td className="px-3 py-4 text-slate-300">{entry.minute}'</td>
+              <td className="px-3 py-4 text-slate-300">{entry.cashOutApplied ? <span className="font-semibold text-amber-300">Cashout {entry.cashOutMinute}'</span> : 'Final'}</td>
+              <td className="px-3 py-4 text-slate-300">{entry.market} {entry.operation}</td>
+              <td className="px-3 py-4 text-slate-300">{entry.odd.toFixed(2)}{entry.cashOutOdd ? <span className="text-amber-300"> -&gt; {entry.cashOutOdd.toFixed(2)}</span> : null}</td>
+              <td className="px-3 py-4 text-slate-300">{entry.entryScoreHome ?? '-'}-{entry.entryScoreAway ?? '-'}{entry.cashOutApplied ? <span className="text-amber-300"> -&gt; {entry.exitScoreHome ?? '-'}-{entry.exitScoreAway ?? '-'}</span> : null}</td>
+              <td className={`px-3 py-4 font-semibold ${entry.result === 'green' ? 'text-emerald-300' : 'text-red-300'}`}>{entry.result}</td>
+              <td className={`px-3 py-4 font-semibold ${entry.profit >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{formatCurrency(entry.profit)}</td>
+              <td className="px-3 py-4 text-slate-400">{entry.reason}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function LogsTable({ logs }: { logs: BotLog[] }) {
+  if (logs.length === 0) return null;
+  return (
+    <Card title="Logs do processamento" subtitle="Verificacoes registradas durante a execucao deste relatorio.">
+      <div className="table-scroll">
+        <table className="min-w-[760px] w-full text-left text-sm">
+          <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
+            <tr>
+              <th className="px-3 py-3">Jogo</th>
+              <th className="px-3 py-3">Minuto</th>
+              <th className="px-3 py-3">Regra</th>
+              <th className="px-3 py-3">Entrada</th>
+              <th className="px-3 py-3">Motivo</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/8">
+            {logs.slice(0, 120).map((log) => (
+              <tr key={log.id}>
+                <td className="px-3 py-3 text-white">{log.game}</td>
+                <td className="px-3 py-3 text-slate-300">{log.minute}'</td>
+                <td className="px-3 py-3 text-slate-300">{log.checkedRule}</td>
+                <td className={`px-3 py-3 font-semibold ${log.entryMade ? 'text-emerald-300' : 'text-slate-400'}`}>{log.entryMade ? 'Sim' : 'Nao'}</td>
+                <td className="px-3 py-3 text-slate-400">{log.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </Card>
   );
 }
 
-export function BacktestPage({ bots, selectedBot, initialResult, historicalGames, onHistoricalGamesLoaded, onResult }: BacktestPageProps) {
-  const bot = useMemo(() => {
-    if (selectedBot) return bots.find((item) => item.id === selectedBot.id) ?? selectedBot;
-    return bots[0];
-  }, [bots, selectedBot]);
+function ReportDetail({ job, onBack }: { job: BacktestJob; onBack: () => void }) {
+  const result = job.result;
+  if (!result) {
+    return (
+      <EmptyState
+        title="Relatorio sem resultado"
+        description="Este chamado foi marcado como processado, mas o resultado tecnico nao foi encontrado."
+        action={<Button onClick={onBack} icon={<ArrowLeft className="h-4 w-4" />}>Voltar aos relatorios</Button>}
+      />
+    );
+  }
 
-  const [result, setResult] = useState<BacktestResult | undefined>(() =>
-    initialResult?.botId === bot?.id ? initialResult : undefined,
+  const accuracy = result.totalEntries > 0 ? (result.greens / result.totalEntries) * 100 : 0;
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title={job.name}
+        description={`${job.type} | ${job.market ?? 'Sem mercado'} | criado em ${formatDateTime(job.createdAt)}`}
+        action={<Button variant="ghost" onClick={onBack} icon={<ArrowLeft className="h-4 w-4" />}>Voltar aos relatorios</Button>}
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Entradas" value={result.totalEntries} />
+        <StatCard label="Greens" value={result.greens} tone="green" />
+        <StatCard label="Reds" value={result.reds} tone="red" />
+        <StatCard label="Assertividade" value={formatPercent(accuracy)} tone={accuracy >= 50 ? 'green' : 'red'} />
+        <StatCard label="Lucro/prejuizo" value={formatCurrency(result.profit)} tone={result.profit >= 0 ? 'green' : 'red'} />
+        <StatCard label="ROI" value={formatPercent(result.roi)} tone={result.roi >= 0 ? 'green' : 'red'} />
+        <StatCard label="Odd media" value={formatNumber(result.averageOdd)} />
+        <StatCard label="Minuto medio" value={`${formatNumber(result.averageMinute, 1)}'`} />
+        <StatCard label="Melhor liga" value={result.bestLeague} tone="blue" />
+        <StatCard label="Pior liga" value={result.worstLeague} />
+      </div>
+
+      <Card title="Entradas simuladas" subtitle="Resultado completo do chamado processado.">
+        <EntryTable entries={result.entries} />
+      </Card>
+
+      <LogsTable logs={job.logs ?? []} />
+    </div>
   );
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | undefined>();
+}
 
-  useEffect(() => {
-    setResult(initialResult?.botId === bot?.id ? initialResult : undefined);
-  }, [bot?.id, initialResult]);
+export function BacktestPage({ jobs, onDeleteJob, onDeleteAllJobs, onCancelJob }: BacktestPageProps) {
+  const [query, setQuery] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('createdAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(1);
+  const [selectedJob, setSelectedJob] = useState<BacktestJob | undefined>();
+  const [parameterJob, setParameterJob] = useState<BacktestJob | undefined>();
+  const [errorJob, setErrorJob] = useState<BacktestJob | undefined>();
 
-  const bankrollData = useMemo(
-    () => buildBankrollData(result?.entries ?? []),
-    [result?.entries],
-  );
+  const completed = jobs.filter((job) => job.status === 'completed').length;
+  const active = jobs.filter((job) => job.status === 'pending' || job.status === 'processing').length;
+  const remainingSlots = Math.max(0, MAX_PENDING_JOBS - active);
 
-  const handleRun = async () => {
-    if (!bot) return;
-    setLoading(true);
-    setLoadError(undefined);
+  const sortedJobs = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtered = jobs.filter((job) => {
+      const text = `${job.name} ${job.botSnapshot.name} ${job.market ?? ''} ${job.type} ${statusLabels[job.status]}`.toLowerCase();
+      return text.includes(normalizedQuery);
+    });
 
-    try {
-      const games = historicalGames.length > 0 ? historicalGames : await loadHistoricalBacktestGames();
-      if (historicalGames.length === 0) onHistoricalGamesLoaded(games);
+    return [...filtered].sort((a, b) => {
+      const valueA = sortKey === 'accuracy' ? getAccuracy(a) : sortKey === 'entries' ? getEntries(a) : sortKey === 'profit' ? getProfit(a) : a[sortKey];
+      const valueB = sortKey === 'accuracy' ? getAccuracy(b) : sortKey === 'entries' ? getEntries(b) : sortKey === 'profit' ? getProfit(b) : b[sortKey];
+      const numericA = typeof valueA === 'number' ? valueA : String(valueA ?? '').toLowerCase();
+      const numericB = typeof valueB === 'number' ? valueB : String(valueB ?? '').toLowerCase();
+      const comparison = numericA > numericB ? 1 : numericA < numericB ? -1 : 0;
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [jobs, query, sortDirection, sortKey]);
 
-      const output = runBacktest(bot, games);
-      setResult(output.result);
-      onResult(output.result, output.logs);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'Nao foi possivel carregar a base historica.');
-    } finally {
-      setLoading(false);
+  const totalPages = Math.max(1, Math.ceil(sortedJobs.length / PAGE_SIZE));
+  const visibleJobs = sortedJobs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const changeSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+      return;
     }
+    setSortKey(key);
+    setSortDirection('asc');
   };
+
+  if (selectedJob) return <ReportDetail job={selectedJob} onBack={() => setSelectedJob(undefined)} />;
 
   return (
     <>
       <PageHeader
-        title="Backtest"
-        description="Teste um metodo contra a base historica de snapshots reais quando houver volume suficiente de odds minuto a minuto."
-        action={
-          bot && (
-            <Button onClick={handleRun} disabled={loading} icon={<Play className="h-4 w-4" />}>
-              {loading ? 'Carregando base...' : 'Rodar backtest'}
-            </Button>
-          )
-        }
+        title="Relatorios do backtest"
+        description={`Concluidos: ${completed} | A processar: ${active} | Voce ainda pode agendar mais ${remainingSlots} relatorios.`}
+        action={<Button variant="danger" onClick={onDeleteAllJobs} icon={<Trash2 className="h-4 w-4" />}>Excluir relatorios</Button>}
       />
-      {bots.length === 0 || !bot ? (
-        <EmptyState title="Nenhum bot disponivel" description="Crie um bot para executar o motor de backtest." />
-      ) : (
-        <div className="space-y-5">
-          <Card title={bot.name || 'Bot sem nome'} subtitle="Bot selecionado para o backtest atual.">
-            <div className="grid gap-4 md:grid-cols-5">
-              <div className="rounded-lg border border-white/8 bg-ink-900/70 p-4 md:col-span-2">
-                <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Descricao</p>
-                <p className="mt-2 text-sm text-slate-300">{bot.description || 'Sem descricao cadastrada.'}</p>
-              </div>
-              <div className="rounded-lg border border-white/8 bg-ink-900/70 p-4">
-                <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Mercado</p>
-                <p className="mt-2 font-semibold text-white">{bot.market || 'Sem mercado'}</p>
-              </div>
-              <div className="rounded-lg border border-white/8 bg-ink-900/70 p-4">
-                <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Odd entrada</p>
-                <p className="mt-2 font-semibold text-white">
-                  {bot.minOdd !== undefined || bot.maxOdd !== undefined
-                    ? `${bot.minOdd?.toFixed(2) ?? '-'} ate ${bot.maxOdd?.toFixed(2) ?? '-'}`
-                    : 'Sem filtro'}
-                </p>
-              </div>
-              <div className="rounded-lg border border-white/8 bg-ink-900/70 p-4">
-                <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Base historica</p>
-                <p className="mt-2 font-semibold text-white">{historicalGames.length || 'Nao carregada'}</p>
-              </div>
-            </div>
-            {loadError && <p className="mt-4 text-sm font-medium text-red-300">{loadError}</p>}
-          </Card>
 
-          {result ? (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <StatCard label="Entradas" value={result.totalEntries} />
-                <StatCard label="Greens" value={result.greens} tone="green" />
-                <StatCard label="Reds" value={result.reds} tone="red" />
-                <StatCard label="Lucro/prejuizo" value={formatCurrency(result.profit)} tone={result.profit >= 0 ? 'green' : 'red'} />
-                <StatCard label="ROI" value={formatPercent(result.roi)} tone={result.roi >= 0 ? 'green' : 'red'} />
-                <StatCard label="Odd media" value={formatNumber(result.averageOdd)} />
-                <StatCard label="Minuto medio" value={`${formatNumber(result.averageMinute, 1)}'`} />
-                <StatCard label="Melhor liga" value={result.bestLeague} tone="blue" />
-              </div>
-
-              <Card title="Evolucao da banca" subtitle="Curva simulada entrada por entrada, partindo de R$0.">
-                <ResponsiveContainer width="100%" height={320}>
-                  <AreaChart data={bankrollData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-                    <defs>
-                      <linearGradient id="bankrollGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#34d399" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0.08} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid stroke="#243244" strokeDasharray="3 3" />
-                    <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} />
-                    <YAxis stroke="#94a3b8" tickFormatter={(value) => formatCurrency(Number(value)).replace('R$', '').trim()} />
-                    <Tooltip
-                      contentStyle={chartTooltipStyle}
-                      formatter={(value, name) => [
-                        name === 'banca' ? formatCurrency(Number(value)) : formatCurrency(Number(value)),
-                        name === 'banca' ? 'Banca' : 'Lucro da entrada',
-                      ]}
-                    />
-                    <Area type="monotone" dataKey="banca" stroke="#34d399" strokeWidth={3} fill="url(#bankrollGradient)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </Card>
-
-              <AdvancedStats entries={result.entries} />
-
-              <Card title="Entradas simuladas" subtitle={`Pior liga: ${result.worstLeague}`}>
-                <div className="table-scroll">
-                  <table className="min-w-[1120px] w-full text-left text-sm">
-                    <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
-                      <tr>
-                        <th className="px-3 py-3">Jogo</th>
-                        <th className="px-3 py-3">Liga</th>
-                        <th className="px-3 py-3">Minuto</th>
-                        <th className="px-3 py-3">Saida</th>
-                        <th className="px-3 py-3">Mercado</th>
-                        <th className="px-3 py-3">Odds</th>
-                        <th className="px-3 py-3">Placar</th>
-                        <th className="px-3 py-3">Resultado</th>
-                        <th className="px-3 py-3">Lucro</th>
-                        <th className="px-3 py-3">Motivo</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/8">
-                      {result.entries.map((entry) => (
-                        <tr key={entry.id}>
-                          <td className="px-3 py-4 text-white">{entry.game}</td>
-                          <td className="px-3 py-4 text-slate-300">{entry.league}</td>
-                          <td className="px-3 py-4 text-slate-300">{entry.minute}'</td>
-                          <td className="px-3 py-4 text-slate-300">
-                            {entry.cashOutApplied ? (
-                              <span className="font-semibold text-amber-300">Cashout {entry.cashOutMinute}'</span>
-                            ) : (
-                              <span>Final</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-4 text-slate-300">{entry.market} {entry.operation}</td>
-                          <td className="px-3 py-4 text-slate-300">
-                            {entry.odd.toFixed(2)}
-                            {entry.cashOutOdd ? <span className="text-amber-300"> -&gt; {entry.cashOutOdd.toFixed(2)}</span> : null}
-                          </td>
-                          <td className="px-3 py-4 text-slate-300">
-                            {entry.entryScoreHome ?? '-'}-{entry.entryScoreAway ?? '-'}
-                            {entry.cashOutApplied ? <span className="text-amber-300"> -&gt; {entry.exitScoreHome ?? '-'}-{entry.exitScoreAway ?? '-'}</span> : null}
-                          </td>
-                          <td className={`px-3 py-4 font-semibold ${entry.result === 'green' ? 'text-emerald-300' : 'text-red-300'}`}>{entry.result}</td>
-                          <td className={`px-3 py-4 font-semibold ${entry.profit >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{formatCurrency(entry.profit)}</td>
-                          <td className="px-3 py-4 text-slate-400">
-                            <p>{entry.reason}</p>
-                            {entry.cashOutApplied && (
-                              <p className="mt-1 text-xs text-amber-300">
-                                {entry.cashOutReason}
-                                {entry.cashOutRulesMatched?.length ? `: ${entry.cashOutRulesMatched.join('; ')}` : ''}
-                              </p>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            </>
-          ) : (
-            <EmptyState
-              title="Backtest aguardando base historica"
-              description="O motor esta pronto, mas precisa de snapshots reais acumulados pelo backend para backtests e replay completos."
-            />
-          )}
+      <Card>
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <input
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Buscar por nome, mercado, tipo ou status"
+            className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 md:max-w-md"
+          />
+          <p className="text-sm text-slate-500">Pagina {page} de {totalPages}</p>
         </div>
-      )}
+
+        {jobs.length === 0 ? (
+          <EmptyState title="Nenhum relatorio criado" description="Use o botao de backtest na aba Bots para criar chamados independentes." />
+        ) : (
+          <>
+            <div className="table-scroll">
+              <table className="min-w-[1320px] w-full text-left text-sm">
+                <thead className="text-xs">
+                  <tr>
+                    <th className="px-3 py-3"><SortButton label="Nome" sortKey="name" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3">Criado por</th>
+                    <th className="px-3 py-3"><SortButton label="Tipo" sortKey="type" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3">Parametros</th>
+                    <th className="px-3 py-3"><SortButton label="Mercado" sortKey="market" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3"><SortButton label="Ass." sortKey="accuracy" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3"><SortButton label="Cont." sortKey="entries" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3"><SortButton label="Lucro" sortKey="profit" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3"><SortButton label="Criado em" sortKey="createdAt" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3"><SortButton label="Agendado para" sortKey="scheduledFor" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3"><SortButton label="Status" sortKey="status" activeKey={sortKey} direction={sortDirection} onSort={changeSort} /></th>
+                    <th className="px-3 py-3 text-right">Acoes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/8">
+                  {visibleJobs.map((job) => {
+                    const clickable = job.status === 'completed' && Boolean(job.result);
+                    return (
+                      <tr key={job.id} className={`${job.status === 'pending' || job.status === 'processing' ? 'opacity-70' : ''}`}>
+                        <td className="px-3 py-4">
+                          <button
+                            type="button"
+                            disabled={!clickable}
+                            onClick={() => clickable && setSelectedJob(job)}
+                            className={`text-left font-semibold ${clickable ? 'text-white hover:text-violet-300' : 'text-slate-400'}`}
+                          >
+                            {job.name}
+                          </button>
+                          <p className="line-clamp-1 text-xs text-slate-500">{job.botSnapshot.name}</p>
+                        </td>
+                        <td className="px-3 py-4 text-slate-300">{job.createdBy}</td>
+                        <td className="px-3 py-4 text-slate-300">{job.type}</td>
+                        <td className="px-3 py-4">
+                          <Button variant="ghost" className="px-2" onClick={() => setParameterJob(job)} icon={<SlidersHorizontal className="h-4 w-4" />}>Parametros</Button>
+                        </td>
+                        <td className="px-3 py-4 text-slate-300">{job.market ?? '-'}</td>
+                        <td className="px-3 py-4 text-slate-300">{getAccuracy(job) !== undefined ? formatPercent(getAccuracy(job) ?? 0) : '-'}</td>
+                        <td className="px-3 py-4 text-slate-300">{getEntries(job) ?? '-'}</td>
+                        <td className={`px-3 py-4 font-semibold ${(getProfit(job) ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                          {getProfit(job) !== undefined ? `${formatCurrency(getProfit(job) ?? 0)} (${formatPercent(getRoi(job) ?? 0)})` : '-'}
+                        </td>
+                        <td className="px-3 py-4 text-slate-300">{formatDateTime(job.createdAt)}</td>
+                        <td className="px-3 py-4 text-slate-300">{formatDateTime(job.scheduledFor)}</td>
+                        <td className="px-3 py-4"><StatusPill status={job.status} /></td>
+                        <td className="px-3 py-4">
+                          <div className="flex justify-end gap-2">
+                            {job.status === 'completed' ? (
+                              <Button variant="ghost" className="px-2" title="Abrir resultado" disabled={!job.result} onClick={() => job.result && setSelectedJob(job)} icon={<Eye className="h-4 w-4" />} />
+                            ) : job.status === 'error' ? (
+                              <Button variant="ghost" className="px-2" title="Ver erro" onClick={() => setErrorJob(job)} icon={<AlertTriangle className="h-4 w-4" />} />
+                            ) : job.status === 'pending' ? (
+                              <Button variant="ghost" className="px-2" title="Cancelar" onClick={() => onCancelJob(job.id)} icon={<Ban className="h-4 w-4" />} />
+                            ) : (
+                              <Button variant="ghost" className="px-2" title="Indisponivel" disabled icon={<Lock className="h-4 w-4" />} />
+                            )}
+                            <Button variant="danger" className="px-2" title="Excluir" onClick={() => onDeleteJob(job.id)} icon={<Trash2 className="h-4 w-4" />} />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <Button variant="ghost" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Anterior</Button>
+              <span className="text-sm text-slate-500">{sortedJobs.length} relatorio(s)</span>
+              <Button variant="ghost" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Proxima</Button>
+            </div>
+          </>
+        )}
+      </Card>
+
+      {parameterJob && <ParametersModal job={parameterJob} onClose={() => setParameterJob(undefined)} />}
+      {errorJob && <ErrorModal job={errorJob} onClose={() => setErrorJob(undefined)} />}
     </>
   );
 }

@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
-import { runAllRankings, runBacktest } from './services/backtest';
+import { runBacktest } from './services/backtest';
 import { loadHistoricalBacktestGames } from './services/replayToBacktest';
 import { storage } from './services/storage';
-import { Bot, BacktestResult, BotLog, Game } from './types';
+import { Bot, BacktestJob, BacktestResult, BotLog, Game } from './types';
 import { Dashboard } from './pages/Dashboard';
 import { BotsPage, duplicateBot } from './pages/BotsPage';
 import { BotEditor } from './pages/BotEditor';
@@ -47,14 +47,37 @@ export default function App() {
   const [bots, setBots] = useState<Bot[]>(() => storage.getBots());
   const [logs, setLogs] = useState<BotLog[]>(() => storage.getLogs());
   const [results, setResults] = useState<BacktestResult[]>(() => storage.getResults());
+  const [backtestJobs, setBacktestJobs] = useState<BacktestJob[]>(() => {
+    const jobs = storage.getBacktestJobs().map((job) => (job.status === 'processing' ? { ...job, status: 'pending' as const, progress: 0 } : job));
+    storage.saveBacktestJobs(jobs);
+    return jobs;
+  });
   const [settings] = useState(() => storage.getSettings());
   const [editingBot, setEditingBot] = useState<Bot | undefined>();
   const [botEditorOpen, setBotEditorOpen] = useState(false);
-  const [selectedBacktestBot, setSelectedBacktestBot] = useState<Bot | undefined>();
-  const [selectedBacktestResult, setSelectedBacktestResult] = useState<BacktestResult | undefined>();
   const [historicalGames, setHistoricalGames] = useState<Game[]>([]);
 
-  const rankings = useMemo(() => runAllRankings(bots, historicalGames), [bots, historicalGames]);
+  const rankings = useMemo(
+    () =>
+      results
+        .map((result) => {
+          const bot = bots.find((item) => item.id === result.botId);
+          return {
+            botId: result.botId,
+            botName: result.botName,
+            roi: result.roi,
+            profit: result.profit,
+            entries: result.totalEntries,
+            greens: result.greens,
+            reds: result.reds,
+            accuracy: result.totalEntries ? Number(((result.greens / result.totalEntries) * 100).toFixed(2)) : 0,
+            mode: bot?.mode ?? 'live',
+            market: bot?.market,
+          };
+        })
+        .sort((a, b) => b.roi - a.roi),
+    [bots, results],
+  );
 
   const navigate = (nextPage: PageKey) => {
     setEditingBot(undefined);
@@ -78,14 +101,7 @@ export default function App() {
 
   const deleteBot = (botId: string) => {
     const next = storage.deleteBot(botId);
-    const nextResults = storage.getResults().filter((result) => result.botId !== botId);
     setBots(next);
-    storage.saveResults(nextResults);
-    setResults(nextResults);
-    if (selectedBacktestBot?.id === botId) {
-      setSelectedBacktestBot(undefined);
-      setSelectedBacktestResult(undefined);
-    }
   };
 
   const duplicate = (bot: Bot) => {
@@ -98,6 +114,10 @@ export default function App() {
     setLogs(storage.appendLogs(newLogs));
   };
 
+  const updateBacktestJob = (jobId: string, patch: Partial<BacktestJob>) => {
+    setBacktestJobs(storage.updateBacktestJob(jobId, patch));
+  };
+
   const getHistoricalGames = async () => {
     if (historicalGames.length > 0) return historicalGames;
     const games = await loadHistoricalBacktestGames();
@@ -105,20 +125,70 @@ export default function App() {
     return games;
   };
 
-  const runBotBacktest = async (bot: Bot) => {
-    setSelectedBacktestBot(bot);
-    setSelectedBacktestResult(undefined);
-    setPage('backtest');
-
-    try {
-      const games = await getHistoricalGames();
-      const output = runBacktest(bot, games);
-      saveBacktest(output.result, output.logs);
-      setSelectedBacktestResult(output.result);
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Nao foi possivel carregar a base historica para o backtest.');
+  const runBotBacktest = (bot: Bot) => {
+    const pendingCount = backtestJobs.filter((job) => job.status === 'pending' || job.status === 'processing').length;
+    if (pendingCount >= 10) {
+      window.alert('Limite de 10 relatorios aguardando/processando atingido.');
+      return;
     }
+
+    const { jobs } = storage.createBacktestJob(bot);
+    setBacktestJobs(jobs);
+    setPage('backtest');
   };
+
+  useEffect(() => {
+    const nextJob = backtestJobs.find((job) => {
+      if (job.status !== 'pending') return false;
+      if (!job.scheduledFor) return true;
+      return new Date(job.scheduledFor).getTime() <= Date.now();
+    });
+
+    if (!nextJob || backtestJobs.some((job) => job.status === 'processing')) return;
+
+    let cancelled = false;
+    const startedAt = new Date().toISOString();
+    setBacktestJobs(storage.updateBacktestJob(nextJob.id, { status: 'processing', startedAt, progress: 10 }));
+
+    const processJob = async () => {
+      try {
+        const games = await getHistoricalGames();
+        if (cancelled) return;
+        setBacktestJobs(storage.updateBacktestJob(nextJob.id, { progress: 55 }));
+
+        const output = runBacktest(nextJob.botSnapshot, games);
+        if (cancelled) return;
+
+        saveBacktest(output.result, output.logs);
+        setBacktestJobs(storage.updateBacktestJob(nextJob.id, {
+          status: 'completed',
+          finishedAt: new Date().toISOString(),
+          progress: 100,
+          resultId: output.result.botId,
+          result: output.result,
+          logs: output.logs,
+          entries: output.result.totalEntries,
+          accuracy: output.result.totalEntries > 0 ? Number(((output.result.greens / output.result.totalEntries) * 100).toFixed(2)) : 0,
+          profit: output.result.profit,
+          roi: output.result.roi,
+        }));
+      } catch (error) {
+        if (cancelled) return;
+        setBacktestJobs(storage.updateBacktestJob(nextJob.id, {
+          status: 'error',
+          finishedAt: new Date().toISOString(),
+          progress: 100,
+          errorMessage: error instanceof Error ? error.message : 'Nao foi possivel processar o backtest.',
+        }));
+      }
+    };
+
+    processJob();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backtestJobs, historicalGames]);
 
   const content = (() => {
     switch (page) {
@@ -151,15 +221,14 @@ export default function App() {
       case 'backtest':
         return (
           <BacktestPage
-            bots={bots}
-            selectedBot={selectedBacktestBot}
-            initialResult={selectedBacktestResult}
-            historicalGames={historicalGames}
-            onHistoricalGamesLoaded={setHistoricalGames}
-            onResult={(result, newLogs) => {
-              saveBacktest(result, newLogs);
-              setSelectedBacktestResult(result);
+            jobs={backtestJobs}
+            onDeleteJob={(jobId) => setBacktestJobs(storage.deleteBacktestJob(jobId))}
+            onDeleteAllJobs={() => {
+              if (window.confirm('Excluir todos os relatorios de backtest?')) {
+                setBacktestJobs(storage.deleteAllBacktestJobs());
+              }
             }}
+            onCancelJob={(jobId) => updateBacktestJob(jobId, { status: 'cancelled', finishedAt: new Date().toISOString() })}
           />
         );
       case 'replay':
