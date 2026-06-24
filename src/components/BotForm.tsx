@@ -140,6 +140,33 @@ const valueForOption = (value: string, option?: ParameterOption) => {
   return toOptionalNumber(value) ?? value;
 };
 
+const normalizeSearchText = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+const filterParameterOptions = (options: ParameterOption[], search: string, selectedValue?: string) => {
+  const query = normalizeSearchText(search).trim();
+  if (!query) return options;
+
+  const filtered = options.filter((option) =>
+    normalizeSearchText(`${option.label} ${option.category ?? ''} ${option.value}`).includes(query),
+  );
+  const selected = selectedValue ? options.find((option) => option.value === selectedValue) : undefined;
+  if (selected && !filtered.some((option) => option.value === selected.value)) return [selected, ...filtered];
+  return filtered;
+};
+
+const filterStringOptions = (options: string[], search: string, selectedValue?: string) => {
+  const query = normalizeSearchText(search).trim();
+  if (!query) return options;
+
+  const filtered = options.filter((option) => !option || normalizeSearchText(option).includes(query));
+  if (selectedValue && !filtered.includes(selectedValue)) return [selectedValue, ...filtered];
+  return filtered;
+};
+
 const createRule = (mode: BotMode, parameter = ''): BotRule => {
   const option = getParameterOption(mode, parameter);
 
@@ -270,6 +297,7 @@ function RangeRuleCard({
 }) {
   const options = optionsOverride ?? getParameterOptions(mode);
   const selectedOption = optionsOverride ? getOptionFromList(optionsOverride, rule.parameter) : getParameterOption(mode, rule.parameter);
+  const [parameterSearch, setParameterSearch] = useState('');
   const isText = selectedOption?.valueType === 'text';
   const min = selectedOption?.min ?? 0;
   const max = selectedOption?.max ?? 100;
@@ -278,6 +306,7 @@ function RangeRuleCard({
   const to = String(rule.secondValue ?? '');
   const operatorOptions = isText ? textOperators : numericOperators;
   const showSecondValue = !isText && rule.operator === 'between';
+  const filteredOptions = filterParameterOptions(options, parameterSearch, rule.parameter);
 
   const updateParameter = (parameter: string) => {
     const option = optionsOverride ? getOptionFromList(optionsOverride, parameter) : getParameterOption(mode, parameter);
@@ -329,13 +358,20 @@ function RangeRuleCard({
 
         <label className="w-full">
           <span className="mb-2 block text-sm font-medium text-slate-300">Parametro</span>
+          <input
+            type="search"
+            value={parameterSearch}
+            onChange={(event) => setParameterSearch(event.target.value)}
+            placeholder="Pesquisar parametro"
+            className="mb-2 min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
+          />
           <select
             value={rule.parameter}
             onChange={(event) => updateParameter(event.target.value)}
             className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
           >
             <option value="">Selecione</option>
-            {groupParameterOptions(options).map((group) => (
+            {groupParameterOptions(filteredOptions).map((group) => (
               <optgroup key={group.label} label={group.label}>
                 {group.options.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -344,6 +380,7 @@ function RangeRuleCard({
                 ))}
               </optgroup>
             ))}
+            {filteredOptions.length === 0 && <option value="" disabled>Nenhum parametro encontrado</option>}
           </select>
         </label>
 
@@ -434,6 +471,7 @@ function PreLiveRuleCard({
 }) {
   const isOddsRule = rule.parameter === 'preLiveOdds';
   const dataOptions = preLiveParameters.filter((option) => option.value !== 'preLiveOdds');
+  const [parameterSearch, setParameterSearch] = useState('');
   const selectedDataOption = getParameterOption('pre-live', rule.parameter);
   const selectedOption: ParameterOption | undefined = isOddsRule
     ? { value: 'preLiveOdds', label: 'Odds pre-live', min: 1.01, max: 200, step: 0.01, defaultFrom: 1.8 }
@@ -441,6 +479,8 @@ function PreLiveRuleCard({
   const isText = !isOddsRule && selectedOption?.valueType === 'text';
   const operatorOptions = isText ? textOperators : (['<=', '>=', '=', '!='] as BotRuleOperator[]);
   const parameterValue = isOddsRule ? (oddMarket ?? '') : rule.parameter;
+  const filteredDataOptions = filterParameterOptions(dataOptions, parameterSearch, rule.parameter);
+  const filteredOddMarkets = filterStringOptions(oddMarkets, parameterSearch, oddMarket);
 
   const changeType = (type: 'odds' | 'data') => {
     if (type === 'odds') {
@@ -546,19 +586,26 @@ function PreLiveRuleCard({
 
         <label>
           <span className="mb-2 block text-sm font-medium text-slate-300">Parametro</span>
+          <input
+            type="search"
+            value={parameterSearch}
+            onChange={(event) => setParameterSearch(event.target.value)}
+            placeholder={isOddsRule ? 'Pesquisar odd' : 'Pesquisar parametro'}
+            className="mb-2 min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+          />
           <select
             value={parameterValue}
             onChange={(event) => changeParameter(event.target.value)}
             className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
           >
             {isOddsRule ? (
-              oddMarkets.map((market) => (
+              filteredOddMarkets.map((market) => (
                 <option key={market} value={market}>
                   {market || 'Selecione uma odd'}
                 </option>
               ))
             ) : (
-              groupParameterOptions(dataOptions).map((group) => (
+              groupParameterOptions(filteredDataOptions).map((group) => (
                 <optgroup key={group.label} label={group.label}>
                   {group.options.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -567,6 +614,9 @@ function PreLiveRuleCard({
                   ))}
                 </optgroup>
               ))
+            )}
+            {((isOddsRule && filteredOddMarkets.length === 0) || (!isOddsRule && filteredDataOptions.length === 0)) && (
+              <option value="" disabled>Nenhum parametro encontrado</option>
             )}
           </select>
         </label>
