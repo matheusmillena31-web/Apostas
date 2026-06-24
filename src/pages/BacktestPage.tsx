@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Ban, CheckCircle2, Clock, Eye, Loader2, Lock, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
@@ -19,6 +20,19 @@ type SortKey = 'name' | 'type' | 'market' | 'accuracy' | 'entries' | 'profit' | 
 
 const PAGE_SIZE = 10;
 const MAX_PENDING_JOBS = 10;
+
+type WalletPoint = {
+  entrada: string;
+  carteira: number;
+  lucro: number;
+};
+
+const chartTooltipStyle = {
+  background: '#101620',
+  border: '1px solid rgba(255,255,255,.1)',
+  borderRadius: '8px',
+  color: '#e2e8f0',
+};
 
 const statusLabels: Record<BacktestJobStatus, string> = {
   pending: 'Aguardando',
@@ -50,6 +64,22 @@ const getAccuracy = (job: BacktestJob) => {
 const getEntries = (job: BacktestJob) => job.entries ?? job.result?.totalEntries;
 const getProfit = (job: BacktestJob) => job.profit ?? job.result?.profit;
 const getRoi = (job: BacktestJob) => job.roi ?? job.result?.roi;
+
+const buildWalletData = (entries: TradeEntry[]): WalletPoint[] => {
+  let wallet = 0;
+  const points: WalletPoint[] = [{ entrada: '0', carteira: 0, lucro: 0 }];
+
+  entries.forEach((entry, index) => {
+    wallet += entry.profit;
+    points.push({
+      entrada: String(index + 1),
+      carteira: Number(wallet.toFixed(2)),
+      lucro: Number(entry.profit.toFixed(2)),
+    });
+  });
+
+  return points;
+};
 
 const statusTone = (status: BacktestJobStatus) => {
   if (status === 'completed') return 'bg-emerald-500/12 text-emerald-300';
@@ -190,6 +220,61 @@ function EntryTable({ entries }: { entries: TradeEntry[] }) {
   );
 }
 
+function WalletChart({ entries }: { entries: TradeEntry[] }) {
+  const data = useMemo(() => buildWalletData(entries), [entries]);
+  const finalWallet = data[data.length - 1]?.carteira ?? 0;
+  const stroke = finalWallet >= 0 ? '#34d399' : '#ef4444';
+
+  return (
+    <Card title="Carteira" subtitle="Evolucao acumulada do lucro/prejuizo entrada por entrada.">
+      <ResponsiveContainer width="100%" height={360}>
+        <AreaChart data={data} margin={{ top: 16, right: 24, left: 0, bottom: 12 }}>
+          <defs>
+            <linearGradient id="walletGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#34d399" stopOpacity={0.24} />
+              <stop offset="48%" stopColor="#34d399" stopOpacity={0.08} />
+              <stop offset="52%" stopColor="#ef4444" stopOpacity={0.08} />
+              <stop offset="100%" stopColor="#ef4444" stopOpacity={0.3} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke="rgba(148,163,184,.22)" strokeDasharray="3 3" />
+          <XAxis
+            dataKey="entrada"
+            stroke="#94a3b8"
+            tick={{ fontSize: 12 }}
+            minTickGap={18}
+            label={{ value: 'Entradas', position: 'insideBottom', offset: -6, fill: '#94a3b8', fontSize: 12 }}
+          />
+          <YAxis
+            stroke="#94a3b8"
+            tick={{ fontSize: 12 }}
+            tickFormatter={(value) => formatCurrency(Number(value)).replace('R$', '').trim()}
+          />
+          <Tooltip
+            contentStyle={chartTooltipStyle}
+            formatter={(value, name) => [
+              formatCurrency(Number(value)),
+              name === 'carteira' ? 'Carteira' : 'Lucro da entrada',
+            ]}
+            labelFormatter={(label) => `Entrada ${label}`}
+          />
+          <ReferenceLine y={0} stroke="rgba(226,232,240,.55)" strokeWidth={1.5} />
+          <Area
+            type="monotone"
+            dataKey="carteira"
+            name="Carteira"
+            stroke={stroke}
+            strokeWidth={3}
+            fill="url(#walletGradient)"
+            dot={false}
+            activeDot={{ r: 4, stroke, strokeWidth: 2, fill: '#101620' }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </Card>
+  );
+}
+
 function ReportDetail({ job, onBack }: { job: BacktestJob; onBack: () => void }) {
   const result = job.result;
   if (!result) {
@@ -224,6 +309,8 @@ function ReportDetail({ job, onBack }: { job: BacktestJob; onBack: () => void })
         <StatCard label="Melhor liga" value={result.bestLeague} tone="blue" />
         <StatCard label="Pior liga" value={result.worstLeague} />
       </div>
+
+      <WalletChart entries={result.entries} />
 
       <Card title="Entradas simuladas" subtitle="Resultado completo do chamado processado.">
         <EntryTable entries={result.entries} />
