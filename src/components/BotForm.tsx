@@ -1,6 +1,7 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, Plus, Save, X } from 'lucide-react';
 import { Bot, BotMode, BotRule, BotRuleConnector, BotRuleOperator } from '../types';
+import { apiFootballService } from '../services/apiFootball';
 import {
   ParameterOption,
   cashOutParameters,
@@ -56,32 +57,38 @@ const oddMarkets = [
 
 const markets = ['', ...goalMarkets, 'Ambas Marcam', 'Match Odds', 'Empate'];
 
-const leagueSuggestions = [
-  'Brasil: Serie A',
-  'Brasil: Serie B',
-  'Brasil: Copa do Brasil',
-  'Brasil: Campeonato Paulista',
-  'Brasil: Campeonato Carioca',
-  'Argentina: Liga Profesional',
-  'Great Britain: England Premier League',
-  'Great Britain: England Championship',
-  'Great Britain: England League One',
-  'Great Britain: England League Two',
-  'Spain: La Liga',
-  'Spain: Segunda Division',
-  'Italy: Serie A',
-  'Italy: Serie B',
-  'Germany: Bundesliga',
-  'Germany: 2. Bundesliga',
-  'France: Ligue 1',
-  'France: Ligue 2',
-  'Portugal: Primeira Liga',
-  'Netherlands: Eredivisie',
-  'USA: Major League Soccer',
-  'World: UEFA Champions League',
-  'World: UEFA Europa League',
-  'South America: Copa Libertadores',
-  'South America: Copa Sudamericana',
+type LeagueOption = {
+  value: string;
+  label: string;
+};
+
+const fallbackLeagueOptions: LeagueOption[] = [
+  { value: 'Serie A', label: 'Serie A - Brasil' },
+  { value: 'Serie B', label: 'Serie B - Brasil' },
+  { value: 'Copa do Brasil', label: 'Copa do Brasil - Brasil' },
+  { value: 'Paulista - A1', label: 'Paulista - A1 - Brasil' },
+  { value: 'Carioca - 1', label: 'Carioca - 1 - Brasil' },
+  { value: 'Liga Profesional Argentina', label: 'Liga Profesional Argentina - Argentina' },
+  { value: 'Premier League', label: 'Premier League - England' },
+  { value: 'Championship', label: 'Championship - England' },
+  { value: 'League One', label: 'League One - England' },
+  { value: 'League Two', label: 'League Two - England' },
+  { value: 'La Liga', label: 'La Liga - Spain' },
+  { value: 'Segunda Division', label: 'Segunda Division - Spain' },
+  { value: 'Serie A', label: 'Serie A - Italy' },
+  { value: 'Serie B', label: 'Serie B - Italy' },
+  { value: 'Bundesliga', label: 'Bundesliga - Germany' },
+  { value: '2. Bundesliga', label: '2. Bundesliga - Germany' },
+  { value: 'Ligue 1', label: 'Ligue 1 - France' },
+  { value: 'Ligue 2', label: 'Ligue 2 - France' },
+  { value: 'Primeira Liga', label: 'Primeira Liga - Portugal' },
+  { value: 'Eredivisie', label: 'Eredivisie - Netherlands' },
+  { value: 'Major League Soccer', label: 'Major League Soccer - USA' },
+  { value: 'World Cup', label: 'World Cup - World' },
+  { value: 'UEFA Champions League', label: 'UEFA Champions League - World' },
+  { value: 'UEFA Europa League', label: 'UEFA Europa League - World' },
+  { value: 'CONMEBOL Libertadores', label: 'CONMEBOL Libertadores - World' },
+  { value: 'CONMEBOL Sudamericana', label: 'CONMEBOL Sudamericana - World' },
 ];
 
 const connectors: BotRuleConnector[] = ['AND', 'OR', 'NOT'];
@@ -762,26 +769,29 @@ function GameSituationCard({
 
 function LeagueSelector({
   title,
+  options,
+  loading,
+  error,
   selected,
   onChange,
 }: {
   title: string;
+  options: LeagueOption[];
+  loading?: boolean;
+  error?: string;
   selected: string[];
   onChange: (leagues: string[]) => void;
 }) {
   const [query, setQuery] = useState('');
-  const typedLeague = query.trim();
-  const normalizedQuery = typedLeague.toLowerCase();
+  const normalizedQuery = query.trim().toLowerCase();
   const selectedNormalized = selected.map((league) => league.trim().toLowerCase());
-  const filteredLeagues = leagueSuggestions
-    .filter((league) => league.toLowerCase().includes(normalizedQuery))
-    .filter((league) => !selectedNormalized.includes(league.toLowerCase()));
-  const canAddTypedLeague = typedLeague.length > 0 && !selectedNormalized.includes(normalizedQuery);
+  const filteredLeagues = options
+    .filter((league) => `${league.label} ${league.value}`.toLowerCase().includes(normalizedQuery))
+    .filter((league) => !selectedNormalized.includes(league.value.toLowerCase()))
+    .slice(0, 80);
 
-  const addLeague = (league: string) => {
-    const normalizedLeague = league.trim();
-    if (!normalizedLeague) return;
-    if (!selectedNormalized.includes(normalizedLeague.toLowerCase())) onChange([...selected, normalizedLeague]);
+  const addLeague = (league: LeagueOption) => {
+    if (!selectedNormalized.includes(league.value.toLowerCase())) onChange([...selected, league.value]);
     setQuery('');
   };
 
@@ -815,39 +825,27 @@ function LeagueSelector({
       <input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            addLeague(typedLeague);
-          }
-        }}
-        placeholder="Digite qualquer liga suportada pela API"
+        placeholder="Buscar liga suportada pela API"
         className="min-h-10 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
       />
+      {loading && <p className="mt-2 text-xs text-slate-500">Carregando ligas da API...</p>}
+      {error && <p className="mt-2 text-xs text-amber-300">{error}</p>}
 
       <div className="mt-3 max-h-48 overflow-y-auto rounded-md border border-white/10 bg-ink-950">
-        {canAddTypedLeague && (
-          <button
-            type="button"
-            onClick={() => addLeague(typedLeague)}
-            className="block w-full border-b border-white/8 px-3 py-2 text-left text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/10 hover:text-emerald-200"
-          >
-            Adicionar "{typedLeague}"
-          </button>
-        )}
         {filteredLeagues.map((league) => (
           <button
-            key={league}
+            key={`${league.label}-${league.value}`}
             type="button"
             onClick={() => addLeague(league)}
             className={`block w-full px-3 py-2 text-left text-sm transition ${
-              selected.includes(league) ? 'bg-violet-600 text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white'
+              selected.includes(league.value) ? 'bg-violet-600 text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white'
             }`}
           >
-            {league}
+            <span className="block font-medium">{league.value}</span>
+            <span className="block text-xs text-slate-500">{league.label}</span>
           </button>
         ))}
-        {filteredLeagues.length === 0 && !canAddTypedLeague && <p className="px-3 py-3 text-sm text-slate-500">Digite uma liga para adicionar.</p>}
+        {filteredLeagues.length === 0 && <p className="px-3 py-3 text-sm text-slate-500">Nenhuma liga encontrada na lista carregada.</p>}
       </div>
     </div>
   );
@@ -855,6 +853,9 @@ function LeagueSelector({
 
 export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
   const defaultBot = createDefaultBot(defaultStake);
+  const [leagueOptions, setLeagueOptions] = useState<LeagueOption[]>(fallbackLeagueOptions);
+  const [loadingLeagues, setLoadingLeagues] = useState(false);
+  const [leagueLoadError, setLeagueLoadError] = useState<string | undefined>();
   const [bot, setBot] = useState<Bot>(() => {
     const rules = (initialBot?.rules ?? defaultBot.rules).map((rule) =>
       rule.mode === 'pre-live' && rule.operator === 'between'
@@ -874,6 +875,53 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
       excludedLeagues: initialBot?.excludedLeagues ?? [],
     };
   });
+
+  useEffect(() => {
+    let mounted = true;
+    setLoadingLeagues(true);
+    setLeagueLoadError(undefined);
+
+    apiFootballService.buscarTodasLigas()
+      .then((items) => {
+        if (!mounted) return;
+        const nextOptions = items
+          .map((item) => ({
+            value: item.league.name,
+            label: `${item.league.name} - ${item.country.name}`,
+          }))
+          .filter((item) => item.value.trim().length > 0)
+          .sort((a, b) => a.label.localeCompare(b.label));
+        const unique = new Map<string, LeagueOption>();
+        nextOptions.forEach((item) => {
+          const key = `${item.value.toLowerCase()}|${item.label.toLowerCase()}`;
+          if (!unique.has(key)) unique.set(key, item);
+        });
+        setLeagueOptions(unique.size > 0 ? [...unique.values()] : fallbackLeagueOptions);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setLeagueOptions(fallbackLeagueOptions);
+        setLeagueLoadError('Nao foi possivel carregar a lista completa agora. Usando lista local de fallback.');
+      })
+      .finally(() => {
+        if (mounted) setLoadingLeagues(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const sortedLeagueOptions = useMemo(() => {
+    const selectedValues = [...(bot.includedLeagues ?? []), ...(bot.excludedLeagues ?? [])];
+    const selectedOptions = selectedValues.map((league) => ({ value: league, label: league }));
+    const map = new Map<string, LeagueOption>();
+    [...selectedOptions, ...leagueOptions].forEach((item) => {
+      const key = `${item.value.toLowerCase()}|${item.label.toLowerCase()}`;
+      if (!map.has(key)) map.set(key, item);
+    });
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [bot.excludedLeagues, bot.includedLeagues, leagueOptions]);
 
   const activeRules = bot.rules.filter((rule) => (bot.mode === 'live' || rule.mode === bot.mode) && !isGameSituationRule(rule));
   const gameSituationRoleRule = bot.rules.find((rule) => rule.parameter === 'favoriteSide');
@@ -1113,11 +1161,17 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
         <div className="grid gap-4 rounded-lg border border-violet-500/80 bg-ink-850/95 p-5 shadow-glow lg:grid-cols-2">
           <LeagueSelector
             title="Inserir ligas selecionadas"
+            options={sortedLeagueOptions}
+            loading={loadingLeagues}
+            error={leagueLoadError}
             selected={bot.includedLeagues ?? []}
             onChange={(includedLeagues) => updateBot({ includedLeagues })}
           />
           <LeagueSelector
             title="Excluir ligas selecionadas"
+            options={sortedLeagueOptions}
+            loading={loadingLeagues}
+            error={leagueLoadError}
             selected={bot.excludedLeagues ?? []}
             onChange={(excludedLeagues) => updateBot({ excludedLeagues })}
           />

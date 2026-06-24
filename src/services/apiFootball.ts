@@ -42,6 +42,11 @@ export class ApiFootballService {
     return unwrap(envelope);
   }
 
+  static async buscarTodasLigas(): Promise<ApiFootballLeagueItem[]> {
+    const envelope = await apiClient<ApiFootballEnvelope<ApiFootballLeagueItem[]>>(endpoints.leagues);
+    return unwrap(envelope);
+  }
+
   static async buscarFixturesAoVivo(): Promise<ApiFootballFixtureItem[]> {
     const envelope = await apiClient<ApiFootballEnvelope<ApiFootballFixtureItem[]>>(endpoints.fixtures, {
       query: { live: 'all', timezone: 'America/Sao_Paulo' },
@@ -105,6 +110,7 @@ export class ApiFootballService {
 export const apiFootballService = {
   buscarStatusProxy: ApiFootballService.buscarStatusProxy,
   buscarLigasAtuais: ApiFootballService.buscarLigasAtuais,
+  buscarTodasLigas: ApiFootballService.buscarTodasLigas,
   buscarFixturesAoVivo: ApiFootballService.buscarFixturesAoVivo,
   buscarFixturesDaLiga: ApiFootballService.buscarFixturesDaLiga,
   buscarStandings: ApiFootballService.buscarStandings,
