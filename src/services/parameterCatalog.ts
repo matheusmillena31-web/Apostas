@@ -26,6 +26,11 @@ const references = [
   ['underdog', 'Zebra'],
 ] as const;
 
+const rhythmReferences = [
+  ['total', 'Total'],
+  ...references,
+] as const;
+
 const statMetrics = [
   ['shots', 'Finalizacoes', 0, 60, 0, 20],
   ['shotsOnTarget', 'Finalizacoes no alvo', 0, 30, 0, 8],
@@ -88,32 +93,41 @@ const differenceOptions = statMetrics.flatMap(([metric, label, , max]) =>
   })),
 );
 
-const contextOptions: ParameterOption[] = [
-  { value: 'favoriteWinning', label: 'Favorito vencendo', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'favoriteDrawing', label: 'Favorito empatando', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'favoriteLosing', label: 'Favorito perdendo', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'underdogWinning', label: 'Zebra vencendo', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'underdogDrawing', label: 'Zebra empatando', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'underdogLosing', label: 'Zebra perdendo', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'homeWinning', label: 'Mandante vencendo', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'homeDrawing', label: 'Mandante empatando', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'homeLosing', label: 'Mandante perdendo', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'awayWinning', label: 'Visitante vencendo', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'awayDrawing', label: 'Visitante empatando', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'awayLosing', label: 'Visitante perdendo', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'favoriteGoalDiff', label: 'Diferenca de gols do favorito', category: 'Contexto favorito/zebra', min: -10, max: 10, defaultFrom: 0, defaultTo: 3 },
-  { value: 'underdogGoalDiff', label: 'Diferenca de gols da zebra', category: 'Contexto favorito/zebra', min: -10, max: 10, defaultFrom: 0, defaultTo: 3 },
-  { value: 'homeGoalDiff', label: 'Diferenca de gols do mandante', category: 'Contexto favorito/zebra', min: -10, max: 10, defaultFrom: 0, defaultTo: 3 },
-  { value: 'awayGoalDiff', label: 'Diferenca de gols do visitante', category: 'Contexto favorito/zebra', min: -10, max: 10, defaultFrom: 0, defaultTo: 3 },
-  { value: 'gameDraw', label: 'Jogo empatado', category: 'Contexto favorito/zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
-  { value: 'anyTeamWinningGoalDiff', label: 'Qualquer time vencendo por X gols', category: 'Contexto favorito/zebra', min: 1, max: 20, defaultFrom: 1, defaultTo: 3 },
-];
+const rhythmMetrics = [
+  ['shots', 'Finalizacoes', 0, 5, 0, 1],
+  ['shotsOnTarget', 'Finalizacoes no alvo', 0, 3, 0, 0.5],
+  ['corners', 'Escanteios', 0, 2, 0, 0.3],
+  ['dangerousAttacks', 'Ataques perigosos', 0, 10, 0, 2],
+  ['cards', 'Cartoes', 0, 2, 0, 0.2],
+] as const;
+
+const rhythmPerMinuteOptions: ParameterOption[] = rhythmMetrics.flatMap(([metric, label, min, max, defaultFrom, defaultTo]) => [
+  ...rhythmReferences.map(([reference, referenceLabel]) => ({
+    value: `rhythm:perMinute:${metric}:${reference}`,
+    label: `${label} por minuto - ${referenceLabel}`,
+    category: 'Ritmo do jogo',
+    min,
+    max,
+    step: 0.01,
+    defaultFrom,
+    defaultTo,
+  })),
+  ...windows.flatMap((window) =>
+    rhythmReferences.map(([reference, referenceLabel]) => ({
+      value: `rhythm:perMinute:${metric}:${reference}:${window}`,
+      label: `${label} por minuto ultimos ${window}' - ${referenceLabel}`,
+      category: 'Ritmo do jogo',
+      min,
+      max,
+      step: 0.01,
+      defaultFrom,
+      defaultTo,
+    })),
+  ),
+]);
 
 const rhythmOptions: ParameterOption[] = [
-  { value: 'rhythm:shotsPerMinute', label: 'Finalizacoes por minuto', category: 'Ritmo do jogo', min: 0, max: 5, step: 0.01, defaultFrom: 0, defaultTo: 1 },
-  { value: 'rhythm:shotsOnTargetPerMinute', label: 'Finalizacoes no alvo por minuto', category: 'Ritmo do jogo', min: 0, max: 3, step: 0.01, defaultFrom: 0, defaultTo: 0.5 },
-  { value: 'rhythm:cornersPerMinute', label: 'Escanteios por minuto', category: 'Ritmo do jogo', min: 0, max: 2, step: 0.01, defaultFrom: 0, defaultTo: 0.3 },
-  { value: 'rhythm:dangerousAttacksPerMinute', label: 'Ataques perigosos por minuto', category: 'Ritmo do jogo', min: 0, max: 10, step: 0.01, defaultFrom: 0, defaultTo: 2 },
+  ...rhythmPerMinuteOptions,
   { value: 'rhythm:minutesSinceShot', label: 'Minutos desde a ultima finalizacao', category: 'Ritmo do jogo', min: 0, max: 120, defaultFrom: 0, defaultTo: 15 },
   { value: 'rhythm:minutesSinceShotOnTarget', label: 'Minutos desde a ultima finalizacao no alvo', category: 'Ritmo do jogo', min: 0, max: 120, defaultFrom: 0, defaultTo: 20 },
   { value: 'rhythm:minutesSinceCorner', label: 'Minutos desde o ultimo escanteio', category: 'Ritmo do jogo', min: 0, max: 120, defaultFrom: 0, defaultTo: 20 },
@@ -151,7 +165,6 @@ export const liveParameters: ParameterOption[] = [
   ...byReferenceOptions,
   ...recentOptions,
   ...differenceOptions,
-  ...contextOptions,
   ...rhythmOptions,
 ];
 

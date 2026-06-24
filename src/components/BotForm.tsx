@@ -23,13 +23,38 @@ type BotFormProps = {
 };
 
 const gameSituationParameters: ParameterOption[] = [
-  { value: '', label: '-', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
-  { value: 'gameDraw', label: 'Empate', min: 0, max: 0, defaultFrom: 0, defaultTo: 0 },
-  { value: 'favoriteWinningGoalDiff', label: 'Favorito vencendo - dif. gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
-  { value: 'favoriteNotLosingGoalDiff', label: 'Favorito empatando ou vencendo - dif. gols', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
-  { value: 'underdogWinningGoalDiff', label: 'Underdog vencendo - dif. gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
-  { value: 'underdogNotLosingGoalDiff', label: 'Underdog empatando ou vencendo - dif. gols', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
-  { value: 'anyTeamWinningGoalDiff', label: 'Qualquer vencendo - dif. gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
+  { value: 'gameDraw', label: 'Jogo empatado', category: 'Resultado atual', min: 0, max: 0, defaultFrom: 0, defaultTo: 0 },
+  { value: 'homeWinning', label: 'Mandante vencendo', category: 'Resultado atual', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'homeDrawing', label: 'Mandante empatando', category: 'Resultado atual', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'homeLosing', label: 'Mandante perdendo', category: 'Resultado atual', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'awayWinning', label: 'Visitante vencendo', category: 'Resultado atual', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'awayDrawing', label: 'Visitante empatando', category: 'Resultado atual', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'awayLosing', label: 'Visitante perdendo', category: 'Resultado atual', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'favoriteWinning', label: 'Favorito vencendo', category: 'Favorito/Zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'favoriteDrawing', label: 'Favorito empatando', category: 'Favorito/Zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'favoriteLosing', label: 'Favorito perdendo', category: 'Favorito/Zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'underdogWinning', label: 'Zebra vencendo', category: 'Favorito/Zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'underdogDrawing', label: 'Zebra empatando', category: 'Favorito/Zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'underdogLosing', label: 'Zebra perdendo', category: 'Favorito/Zebra', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'favoriteGoalDiff', label: 'Diferenca de gols do favorito', category: 'Diferenca de gols', min: -10, max: 10, defaultFrom: 0, defaultTo: 3 },
+  { value: 'underdogGoalDiff', label: 'Diferenca de gols da zebra', category: 'Diferenca de gols', min: -10, max: 10, defaultFrom: 0, defaultTo: 3 },
+  { value: 'homeGoalDiff', label: 'Diferenca de gols do mandante', category: 'Diferenca de gols', min: -10, max: 10, defaultFrom: 0, defaultTo: 3 },
+  { value: 'awayGoalDiff', label: 'Diferenca de gols do visitante', category: 'Diferenca de gols', min: -10, max: 10, defaultFrom: 0, defaultTo: 3 },
+  { value: 'favoriteWinningGoalDiff', label: 'Favorito vencendo - dif. gols', category: 'Diferenca de gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
+  { value: 'favoriteNotLosingGoalDiff', label: 'Favorito empatando ou vencendo - dif. gols', category: 'Diferenca de gols', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
+  { value: 'underdogWinningGoalDiff', label: 'Zebra vencendo - dif. gols', category: 'Diferenca de gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
+  { value: 'underdogNotLosingGoalDiff', label: 'Zebra empatando ou vencendo - dif. gols', category: 'Diferenca de gols', min: 0, max: 20, defaultFrom: 0, defaultTo: 20 },
+  { value: 'anyTeamWinningGoalDiff', label: 'Qualquer time vencendo por X gols', category: 'Diferenca de gols', min: 1, max: 20, defaultFrom: 1, defaultTo: 20 },
+  { value: 'scoreChanged', label: 'Placar mudou', category: 'Mudanca de placar', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'scoreUnchanged', label: 'Placar nao mudou', category: 'Mudanca de placar', min: 1, max: 1, defaultFrom: 1, defaultTo: 1 },
+  { value: 'favoriteGoal', label: 'Gol do favorito', category: 'Mudanca de placar', min: 1, max: 10, defaultFrom: 1, defaultTo: 10 },
+  { value: 'underdogGoal', label: 'Gol da zebra', category: 'Mudanca de placar', min: 1, max: 10, defaultFrom: 1, defaultTo: 10 },
+  { value: 'homeGoal', label: 'Gol do mandante', category: 'Mudanca de placar', min: 1, max: 10, defaultFrom: 1, defaultTo: 10 },
+  { value: 'awayGoal', label: 'Gol do visitante', category: 'Mudanca de placar', min: 1, max: 10, defaultFrom: 1, defaultTo: 10 },
+  { value: 'favoriteConceded', label: 'Favorito sofreu gol', category: 'Mudanca de placar', min: 1, max: 10, defaultFrom: 1, defaultTo: 10 },
+  { value: 'underdogConceded', label: 'Zebra sofreu gol', category: 'Mudanca de placar', min: 1, max: 10, defaultFrom: 1, defaultTo: 10 },
+  { value: 'homeConceded', label: 'Mandante sofreu gol', category: 'Mudanca de placar', min: 1, max: 10, defaultFrom: 1, defaultTo: 10 },
+  { value: 'awayConceded', label: 'Visitante sofreu gol', category: 'Mudanca de placar', min: 1, max: 10, defaultFrom: 1, defaultTo: 10 },
 ];
 
 const gameSituationRoleOptions = [
@@ -146,10 +171,10 @@ const createGameSituationRoleRule = (): BotRule => ({
 const createGameSituationMetricRule = (): BotRule => ({
   id: uid('rule'),
   mode: 'live',
-  parameter: 'favoriteWinningGoalDiff',
+  parameter: 'gameDraw',
   operator: 'between',
-  value: 1,
-  secondValue: 20,
+  value: 0,
+  secondValue: 0,
   connector: 'AND',
 });
 
@@ -655,8 +680,8 @@ function GameSituationCard({
   onPatchRole: (patch: Partial<BotRule>) => void;
   onPatchMetric: (patch: Partial<BotRule>) => void;
 }) {
-  const enabled = Boolean(roleRule && metricRule);
-  const selectedOption = gameSituationParameters.find((option) => option.value === metricRule?.parameter) ?? gameSituationParameters[2];
+  const enabled = Boolean(metricRule);
+  const selectedOption = gameSituationParameters.find((option) => option.value === metricRule?.parameter) ?? gameSituationParameters[0];
   const from = String(metricRule?.value ?? selectedOption.defaultFrom ?? '');
   const to = String(metricRule?.secondValue ?? selectedOption.defaultTo ?? '');
   const min = selectedOption.min ?? 0;
@@ -669,7 +694,7 @@ function GameSituationCard({
       return;
     }
 
-    const option = gameSituationParameters.find((item) => item.value === parameter) ?? gameSituationParameters[2];
+    const option = gameSituationParameters.find((item) => item.value === parameter) ?? gameSituationParameters[0];
     onPatchMetric({
       parameter,
       operator: 'between',
@@ -725,10 +750,15 @@ function GameSituationCard({
             onChange={(event) => updateParameter(event.target.value)}
             className="min-h-11 w-full rounded-md border border-white/10 bg-ink-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
           >
-            {gameSituationParameters.map((parameter) => (
-              <option key={parameter.value} value={parameter.value}>
-                {parameter.label}
-              </option>
+            <option value="">Selecione</option>
+            {groupParameterOptions(gameSituationParameters).map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.options.map((parameter) => (
+                  <option key={parameter.value} value={parameter.value}>
+                    {parameter.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </label>
@@ -1005,7 +1035,10 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
   };
 
   const patchGameSituationRole = (patch: Partial<BotRule>) => {
-    const rules = bot.rules.map((rule) => (rule.parameter === 'favoriteSide' ? { ...rule, ...patch } : rule));
+    const hasRoleRule = bot.rules.some((rule) => rule.parameter === 'favoriteSide');
+    const rules = hasRoleRule
+      ? bot.rules.map((rule) => (rule.parameter === 'favoriteSide' ? { ...rule, ...patch } : rule))
+      : [...bot.rules, { ...createGameSituationRoleRule(), ...patch }];
     updateBot({ rules, mode: 'live' });
   };
 

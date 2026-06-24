@@ -220,6 +220,49 @@ const getPerMinuteValue = (snapshot: GameSnapshot, metric: string) => {
   return typeof value === 'number' ? value / snapshot.minute : undefined;
 };
 
+const getSideValue = (game: Game, snapshot: GameSnapshot, metric: string, reference: string) => {
+  const value = reference === 'total'
+    ? getTotalMetric(snapshot, metric)
+    : getTeamStatValue(snapshot, game, metric, reference);
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+};
+
+const getSnapshotBeforeMinute = (game: Game, currentIndex: number, targetMinute: number) =>
+  game.snapshots
+    .slice(0, currentIndex + 1)
+    .filter((item) => item.minute <= targetMinute)
+    .sort((a, b) => b.minute - a.minute)[0];
+
+const getRhythmBaselineSnapshot = (game: Game, currentSnapshot: GameSnapshot, currentIndex: number, windowMinutes?: number) => {
+  if (currentIndex <= 0) return undefined;
+  if (windowMinutes === undefined) return game.snapshots[0];
+
+  const targetMinute = currentSnapshot.minute - windowMinutes;
+  return getSnapshotBeforeMinute(game, currentIndex, targetMinute) ?? game.snapshots[0];
+};
+
+const getStatDelta = (game: Game, currentSnapshot: GameSnapshot, currentIndex: number, metric: string, reference: string, windowMinutes?: number) => {
+  const baseline = getRhythmBaselineSnapshot(game, currentSnapshot, currentIndex, windowMinutes);
+  if (!baseline || baseline === currentSnapshot) return undefined;
+
+  const currentValue = getSideValue(game, currentSnapshot, metric, reference);
+  const baselineValue = getSideValue(game, baseline, metric, reference);
+  if (currentValue === undefined || baselineValue === undefined) return undefined;
+
+  return Math.max(0, currentValue - baselineValue);
+};
+
+const getStatPerMinute = (game: Game, currentSnapshot: GameSnapshot, currentIndex: number, metric: string, reference: string, windowMinutes?: number) => {
+  const baseline = getRhythmBaselineSnapshot(game, currentSnapshot, currentIndex, windowMinutes);
+  if (!baseline || baseline === currentSnapshot) return undefined;
+
+  const delta = getStatDelta(game, currentSnapshot, currentIndex, metric, reference, windowMinutes);
+  const minutes = currentSnapshot.minute - baseline.minute;
+  if (delta === undefined || minutes <= 0) return undefined;
+
+  return delta / minutes;
+};
+
 const getTotalGoals = (snapshot: GameSnapshot) => snapshot.scoreHome + snapshot.scoreAway;
 
 const getTotalCards = (snapshot: GameSnapshot) => snapshot.stats.cards;
@@ -309,11 +352,33 @@ const getFavoriteGameSituationValues = (game: Game, snapshot: GameSnapshot) => {
   };
 };
 
+const getPreviousSnapshot = (game: Game, snapshotIndex: number) => (snapshotIndex > 0 ? game.snapshots[snapshotIndex - 1] : undefined);
+
+const getReferenceGoalChange = (currentSnapshot: GameSnapshot, previousSnapshot: GameSnapshot | undefined, game: Game, reference: TeamReference) => {
+  if (!previousSnapshot) return undefined;
+  const currentScore = getScoreForReference(currentSnapshot, game, reference);
+  const previousScore = getScoreForReference(previousSnapshot, game, reference);
+  if (currentScore === undefined || previousScore === undefined) return undefined;
+  return Math.max(0, currentScore - previousScore);
+};
+
+const getReferenceConcededChange = (currentSnapshot: GameSnapshot, previousSnapshot: GameSnapshot | undefined, game: Game, reference: TeamReference) => {
+  if (!previousSnapshot) return undefined;
+  const currentScore = getOpponentScoreForReference(currentSnapshot, game, reference);
+  const previousScore = getOpponentScoreForReference(previousSnapshot, game, reference);
+  if (currentScore === undefined || previousScore === undefined) return undefined;
+  return Math.max(0, currentScore - previousScore);
+};
+
 const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapshot, odd: number, snapshotIndex: number): unknown => {
   const stats = snapshot.stats;
 
   if (rule.mode === 'live') {
     const gameSituationValues = getFavoriteGameSituationValues(game, snapshot);
+    const previousSnapshot = getPreviousSnapshot(game, snapshotIndex);
+    const scoreChanged = previousSnapshot
+      ? snapshot.scoreHome !== previousSnapshot.scoreHome || snapshot.scoreAway !== previousSnapshot.scoreAway
+      : undefined;
     const statMatch = rule.parameter.match(/^stat:([^:]+):([^:]+)$/);
     if (statMatch) return getTeamStatValue(snapshot, game, statMatch[1], statMatch[2]);
 
@@ -326,6 +391,11 @@ const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapsho
     if (rule.parameter.startsWith('odds:')) return getOddsMovementValue(bot, game, snapshot, snapshotIndex, rule.parameter);
 
     if (rule.parameter.startsWith('rhythm:')) {
+      const perMinuteMatch = rule.parameter.match(/^rhythm:perMinute:([^:]+):([^:]+)(?::(\d+))?$/);
+      if (perMinuteMatch) {
+        return getStatPerMinute(game, snapshot, snapshotIndex, perMinuteMatch[1], perMinuteMatch[2], perMinuteMatch[3] ? Number(perMinuteMatch[3]) : undefined);
+      }
+
       switch (rule.parameter) {
         case 'rhythm:shotsPerMinute':
           return getPerMinuteValue(snapshot, 'shots');
@@ -382,6 +452,16 @@ const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapsho
       underdogGoalDiff: getReferenceGoalDiff(snapshot, game, 'underdog'),
       homeGoalDiff: getReferenceGoalDiff(snapshot, game, 'home'),
       awayGoalDiff: getReferenceGoalDiff(snapshot, game, 'away'),
+      scoreChanged: scoreChanged === undefined ? undefined : scoreChanged ? 1 : 0,
+      scoreUnchanged: scoreChanged === undefined ? undefined : scoreChanged ? 0 : 1,
+      favoriteGoal: getReferenceGoalChange(snapshot, previousSnapshot, game, 'favorite'),
+      underdogGoal: getReferenceGoalChange(snapshot, previousSnapshot, game, 'underdog'),
+      homeGoal: getReferenceGoalChange(snapshot, previousSnapshot, game, 'home'),
+      awayGoal: getReferenceGoalChange(snapshot, previousSnapshot, game, 'away'),
+      favoriteConceded: getReferenceConcededChange(snapshot, previousSnapshot, game, 'favorite'),
+      underdogConceded: getReferenceConcededChange(snapshot, previousSnapshot, game, 'underdog'),
+      homeConceded: getReferenceConcededChange(snapshot, previousSnapshot, game, 'home'),
+      awayConceded: getReferenceConcededChange(snapshot, previousSnapshot, game, 'away'),
       ...gameSituationValues,
     };
 
