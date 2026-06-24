@@ -1186,16 +1186,6 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
         </div>
       </Card>
 
-      <div className="flex justify-center">
-        <label className="w-full max-w-sm">
-          <span className="mb-2 block text-sm font-semibold text-slate-300">Classificar por:</span>
-          <Select defaultValue="casa-fora">
-            <option value="casa-fora">Casa/Fora</option>
-            <option value="favorito-underdog">Favorito/Underdog</option>
-          </Select>
-        </label>
-      </div>
-
       <section className="space-y-5">
         <h2 className="text-xl font-semibold text-white">Passo 1: escolha dos parametros gerais</h2>
         {activeRules.map((rule, index) => (
