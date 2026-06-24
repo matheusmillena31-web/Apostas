@@ -166,7 +166,7 @@ const buildJobFromResult = (result: BacktestResult): BacktestJob => {
   };
 };
 
-const normalizeBacktestJob = (payload: unknown): BacktestJob => {
+export const normalizeBacktestJob = (payload: unknown): BacktestJob => {
   const item = payload as Partial<BacktestJob> & Record<string, any>;
   const botSnapshot = normalizeBot(item.botSnapshot ?? {});
   const now = new Date().toISOString();
@@ -201,7 +201,7 @@ const normalizeBacktestJob = (payload: unknown): BacktestJob => {
   };
 };
 
-const createBacktestJobFromBot = (bot: Bot, scheduledFor?: string): BacktestJob => {
+export const createBacktestJobDraft = (bot: Bot, scheduledFor?: string): BacktestJob => {
   const now = new Date().toISOString();
   const botSnapshot = cloneBot(bot);
   return {
@@ -263,7 +263,7 @@ export const storage = {
   },
   saveBacktestJobs: (jobs: BacktestJob[]) => write(keys.backtestJobs, jobs),
   createBacktestJob: (bot: Bot, scheduledFor?: string) => {
-    const job = createBacktestJobFromBot(bot, scheduledFor);
+    const job = createBacktestJobDraft(bot, scheduledFor);
     const jobs = [job, ...storage.getBacktestJobs()];
     storage.saveBacktestJobs(jobs);
     return { job, jobs };

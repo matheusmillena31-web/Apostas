@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { runBacktest } from './services/backtest';
+import { backtestJobRepository } from './services/backtestJobRepository';
 import { loadHistoricalBacktestGames } from './services/replayToBacktest';
 import { storage } from './services/storage';
 import { Bot, BacktestJob, BacktestResult, BotLog, Game } from './types';
@@ -49,7 +50,6 @@ export default function App() {
   const [results, setResults] = useState<BacktestResult[]>(() => storage.getResults());
   const [backtestJobs, setBacktestJobs] = useState<BacktestJob[]>(() => {
     const jobs = storage.getBacktestJobs().map((job) => (job.status === 'processing' ? { ...job, status: 'pending' as const, progress: 0 } : job));
-    storage.saveBacktestJobs(jobs);
     return jobs;
   });
   const [settings] = useState(() => storage.getSettings());
@@ -58,6 +58,28 @@ export default function App() {
   const historicalGamesRef = useRef<Game[]>([]);
   const historicalGamesPromiseRef = useRef<Promise<Game[]> | undefined>(undefined);
   const processingJobIdRef = useRef<string | undefined>(undefined);
+
+  const applyBacktestJobs = (jobs: BacktestJob[]) => {
+    setBacktestJobs(jobs);
+    const completedResults = jobs
+      .filter((job) => job.status === 'completed' && job.result)
+      .map((job) => job.result as BacktestResult);
+
+    setResults(completedResults);
+  };
+
+  useEffect(() => {
+    let mounted = true;
+
+    backtestJobRepository.list().then((jobs) => {
+      if (!mounted) return;
+      applyBacktestJobs(jobs.map((job) => (job.status === 'processing' ? { ...job, status: 'pending' as const, progress: 0 } : job)));
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const rankings = useMemo(
     () =>
@@ -112,12 +134,14 @@ export default function App() {
   };
 
   const saveBacktest = (result: BacktestResult, newLogs: BotLog[]) => {
-    setResults(storage.saveResult(result));
+    setResults((current) => [result, ...current]);
     setLogs(storage.appendLogs(newLogs));
   };
 
-  const updateBacktestJob = (jobId: string, patch: Partial<BacktestJob>) => {
-    setBacktestJobs(storage.updateBacktestJob(jobId, patch));
+  const updateBacktestJob = async (jobId: string, patch: Partial<BacktestJob>) => {
+    const jobs = await backtestJobRepository.patch(jobId, patch);
+    applyBacktestJobs(jobs);
+    return jobs;
   };
 
   const getHistoricalGames = async () => {
@@ -136,15 +160,15 @@ export default function App() {
     return historicalGamesPromiseRef.current;
   };
 
-  const runBotBacktest = (bot: Bot) => {
+  const runBotBacktest = async (bot: Bot) => {
     const pendingCount = backtestJobs.filter((job) => job.status === 'pending' || job.status === 'processing').length;
     if (pendingCount >= 10) {
       window.alert('Limite de 10 relatorios aguardando/processando atingido.');
       return;
     }
 
-    const { jobs } = storage.createBacktestJob(bot);
-    setBacktestJobs(jobs);
+    const { jobs } = await backtestJobRepository.create(bot);
+    applyBacktestJobs(jobs);
     setPage('backtest');
   };
 
@@ -159,39 +183,38 @@ export default function App() {
 
     processingJobIdRef.current = nextJob.id;
     const startedAt = new Date().toISOString();
-    setBacktestJobs(storage.updateBacktestJob(nextJob.id, { status: 'processing', startedAt, progress: 10 }));
 
     const processJob = async () => {
       try {
+        await updateBacktestJob(nextJob.id, { status: 'processing', startedAt, progress: 10 });
         const games = await getHistoricalGames();
-        setBacktestJobs(storage.updateBacktestJob(nextJob.id, { progress: 55 }));
+        await updateBacktestJob(nextJob.id, { progress: 55 });
 
         const output = runBacktest(nextJob.botSnapshot, games);
 
         saveBacktest(output.result, output.logs);
-        const completedJobs = storage.updateBacktestJob(nextJob.id, {
+        const completedJobs = await updateBacktestJob(nextJob.id, {
           status: 'completed',
           finishedAt: new Date().toISOString(),
           progress: 100,
           resultId: output.result.botId,
           result: output.result,
-          logs: output.logs,
           entries: output.result.totalEntries,
           accuracy: output.result.totalEntries > 0 ? Number(((output.result.greens / output.result.totalEntries) * 100).toFixed(2)) : 0,
           profit: output.result.profit,
           roi: output.result.roi,
         });
         processingJobIdRef.current = undefined;
-        setBacktestJobs(completedJobs);
+        applyBacktestJobs(completedJobs);
       } catch (error) {
-        const errorJobs = storage.updateBacktestJob(nextJob.id, {
+        const errorJobs = await updateBacktestJob(nextJob.id, {
           status: 'error',
           finishedAt: new Date().toISOString(),
           progress: 100,
           errorMessage: error instanceof Error ? error.message : 'Nao foi possivel processar o backtest.',
         });
         processingJobIdRef.current = undefined;
-        setBacktestJobs(errorJobs);
+        applyBacktestJobs(errorJobs);
       }
     };
 
@@ -230,10 +253,14 @@ export default function App() {
         return (
           <BacktestPage
             jobs={backtestJobs}
-            onDeleteJob={(jobId) => setBacktestJobs(storage.deleteBacktestJob(jobId))}
-            onDeleteAllJobs={() => {
+            onDeleteJob={async (jobId) => {
+              const jobs = await backtestJobRepository.delete(jobId);
+              applyBacktestJobs(jobs);
+            }}
+            onDeleteAllJobs={async () => {
               if (window.confirm('Excluir todos os relatorios de backtest?')) {
-                setBacktestJobs(storage.deleteAllBacktestJobs());
+                const jobs = await backtestJobRepository.deleteAll();
+                applyBacktestJobs(jobs);
               }
             }}
             onCancelJob={(jobId) => updateBacktestJob(jobId, { status: 'cancelled', finishedAt: new Date().toISOString() })}

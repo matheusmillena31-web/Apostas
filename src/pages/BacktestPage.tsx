@@ -448,7 +448,7 @@ export function BacktestPage({ jobs, onDeleteJob, onDeleteAllJobs, onCancelJob }
                             ) : (
                               <Button variant="ghost" className="px-2" title="Indisponivel" disabled icon={<Lock className="h-4 w-4" />} />
                             )}
-                            <Button variant="danger" className="px-2" title="Excluir" onClick={() => onDeleteJob(job.id)} icon={<Trash2 className="h-4 w-4" />} />
+                            <Button variant="danger" className="px-2" title="Excluir relatorio" onClick={() => onDeleteJob(job.id)} icon={<X className="h-4 w-4" />} />
                           </div>
                         </td>
                       </tr>

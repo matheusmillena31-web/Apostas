@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createSnapshotStore } from './snapshotStore.mjs';
+import { createBacktestJobStore } from './backtestJobStore.mjs';
 
 const envFiles = ['.env.local', '.env'];
 
@@ -33,9 +34,11 @@ const apiFootballToken = process.env.API_FOOTBALL_TOKEN;
 const allowedOrigin = process.env.BACKEND_ALLOWED_ORIGIN ?? '*';
 const snapshotPath = resolve(process.cwd(), process.env.API_FOOTBALL_SNAPSHOT_PATH ?? 'server/storage/api-football-snapshots.jsonl');
 const collectorStatePath = resolve(process.cwd(), process.env.API_FOOTBALL_COLLECTOR_STATE_PATH ?? 'server/storage/api-football-collector-state.json');
+const backtestJobsPath = resolve(process.cwd(), process.env.BACKTEST_JOBS_PATH ?? 'server/storage/backtest-jobs.json');
 const databaseUrl = process.env.DATABASE_URL;
 const databaseSsl = process.env.DATABASE_SSL !== 'false';
 const snapshotStore = createSnapshotStore({ snapshotPath, databaseUrl, databaseSsl });
+const backtestJobStore = createBacktestJobStore({ filePath: backtestJobsPath, databaseUrl, databaseSsl });
 const collectorEnabled = process.env.API_FOOTBALL_COLLECTOR_ENABLED !== 'false';
 const collectorIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_INTERVAL_MS ?? 90000);
 const collectorMaxFixtures = Number(process.env.API_FOOTBALL_COLLECTOR_MAX_FIXTURES ?? 2);
@@ -151,6 +154,17 @@ const readBody = (request) =>
     request.on('end', () => resolveBody(Buffer.concat(chunks)));
     request.on('error', reject);
   });
+
+const readJsonBody = async (request) => {
+  const body = await readBody(request);
+  if (!body.length) return {};
+
+  try {
+    return JSON.parse(body.toString('utf8'));
+  } catch {
+    throw new Error('JSON invalido no corpo da requisicao.');
+  }
+};
 
 const getSnapshotCount = () => snapshotStore.getSnapshotCount();
 
@@ -630,7 +644,9 @@ const server = createServer(async (request, response) => {
       hasToken: Boolean(apiFootballToken),
       baseUrl: apiFootballBaseUrl,
       storageMode: snapshotStore.mode,
+      backtestJobStorageMode: backtestJobStore.mode,
       snapshotPath,
+      backtestJobsPath,
       collectorStatePath,
       snapshotCount: await getSnapshotCount(),
       collector: collectorState,
@@ -654,6 +670,83 @@ const server = createServer(async (request, response) => {
       snapshotCount: await getSnapshotCount(),
     });
     return;
+  }
+
+  if (incomingUrl.pathname === '/api/football/backtest/jobs') {
+    try {
+      if (request.method === 'GET') {
+        sendJson(response, 200, {
+          ok: true,
+          storageMode: backtestJobStore.mode,
+          jobs: await backtestJobStore.listJobs(),
+        });
+        return;
+      }
+
+      if (request.method === 'POST') {
+        const body = await readJsonBody(request);
+        if (!body?.job?.id) {
+          sendJson(response, 400, { ok: false, message: 'Chamado de backtest invalido.' });
+          return;
+        }
+
+        sendJson(response, 200, {
+          ok: true,
+          storageMode: backtestJobStore.mode,
+          jobs: await backtestJobStore.upsertJob(body.job),
+        });
+        return;
+      }
+
+      if (request.method === 'DELETE') {
+        sendJson(response, 200, {
+          ok: true,
+          storageMode: backtestJobStore.mode,
+          jobs: await backtestJobStore.deleteAllJobs(),
+        });
+        return;
+      }
+    } catch (error) {
+      sendJson(response, 500, {
+        ok: false,
+        message: 'Nao foi possivel acessar os chamados de backtest.',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+  }
+
+  const backtestJobMatch = incomingUrl.pathname.match(/^\/api\/football\/backtest\/jobs\/([^/]+)$/);
+  if (backtestJobMatch) {
+    const jobId = decodeURIComponent(backtestJobMatch[1]);
+
+    try {
+      if (request.method === 'PATCH') {
+        const body = await readJsonBody(request);
+        sendJson(response, 200, {
+          ok: true,
+          storageMode: backtestJobStore.mode,
+          jobs: await backtestJobStore.patchJob(jobId, body?.patch ?? {}),
+        });
+        return;
+      }
+
+      if (request.method === 'DELETE') {
+        sendJson(response, 200, {
+          ok: true,
+          storageMode: backtestJobStore.mode,
+          jobs: await backtestJobStore.deleteJob(jobId),
+        });
+        return;
+      }
+    } catch (error) {
+      sendJson(response, 500, {
+        ok: false,
+        message: 'Nao foi possivel atualizar o chamado de backtest.',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
   }
 
   if (incomingUrl.pathname === '/api/football/replay/games') {
