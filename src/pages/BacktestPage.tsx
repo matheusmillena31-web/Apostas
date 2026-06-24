@@ -5,7 +5,7 @@ import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { StatCard } from '../components/StatCard';
-import { BacktestJob, BacktestJobStatus, Bot, BotLog, BotRule, TradeEntry } from '../types';
+import { BacktestJob, BacktestJobStatus, Bot, BotRule, TradeEntry } from '../types';
 import { formatCurrency, formatNumber, formatPercent } from '../utils/formatters';
 
 type BacktestPageProps = {
@@ -190,38 +190,6 @@ function EntryTable({ entries }: { entries: TradeEntry[] }) {
   );
 }
 
-function LogsTable({ logs }: { logs: BotLog[] }) {
-  if (logs.length === 0) return null;
-  return (
-    <Card title="Logs do processamento" subtitle="Verificacoes registradas durante a execucao deste relatorio.">
-      <div className="table-scroll">
-        <table className="min-w-[760px] w-full text-left text-sm">
-          <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
-            <tr>
-              <th className="px-3 py-3">Jogo</th>
-              <th className="px-3 py-3">Minuto</th>
-              <th className="px-3 py-3">Regra</th>
-              <th className="px-3 py-3">Entrada</th>
-              <th className="px-3 py-3">Motivo</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/8">
-            {logs.slice(0, 120).map((log) => (
-              <tr key={log.id}>
-                <td className="px-3 py-3 text-white">{log.game}</td>
-                <td className="px-3 py-3 text-slate-300">{log.minute}'</td>
-                <td className="px-3 py-3 text-slate-300">{log.checkedRule}</td>
-                <td className={`px-3 py-3 font-semibold ${log.entryMade ? 'text-emerald-300' : 'text-slate-400'}`}>{log.entryMade ? 'Sim' : 'Nao'}</td>
-                <td className="px-3 py-3 text-slate-400">{log.reason}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}
-
 function ReportDetail({ job, onBack }: { job: BacktestJob; onBack: () => void }) {
   const result = job.result;
   if (!result) {
@@ -260,8 +228,6 @@ function ReportDetail({ job, onBack }: { job: BacktestJob; onBack: () => void })
       <Card title="Entradas simuladas" subtitle="Resultado completo do chamado processado.">
         <EntryTable entries={result.entries} />
       </Card>
-
-      <LogsTable logs={job.logs ?? []} />
     </div>
   );
 }
