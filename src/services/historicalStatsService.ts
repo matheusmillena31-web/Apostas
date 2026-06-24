@@ -155,8 +155,8 @@ const buildTeamHistory = (records: TeamGameRecord[], homeAwaySide: TeamSide): Te
   awayOnly: homeAwaySide === 'away' ? summarizeRecords(records.filter((record) => record.side === 'away'), MIN_SAMPLES.homeAway) : undefined,
 });
 
-const getFavoriteSide = (homeOdd: number, awayOdd: number): 'home' | 'away' | 'none' => {
-  if (!Number.isFinite(homeOdd) || !Number.isFinite(awayOdd)) return 'none';
+const getFavoriteSide = (homeOdd?: number, awayOdd?: number): 'home' | 'away' | 'none' => {
+  if (typeof homeOdd !== 'number' || typeof awayOdd !== 'number' || !Number.isFinite(homeOdd) || !Number.isFinite(awayOdd)) return 'none';
   if (Math.abs(homeOdd - awayOdd) < FAVORITE_NONE_DIFF) return 'none';
   return homeOdd < awayOdd ? 'home' : 'away';
 };

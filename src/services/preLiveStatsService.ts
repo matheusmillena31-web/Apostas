@@ -109,7 +109,7 @@ const getDifferenceValue = (game: Game, parameter: string) => {
   return typeof value === 'number' ? value : undefined;
 };
 
-export const resolvePreLiveRuleValue = (ruleParameter: string, bot: Bot, game: Game, fallbackOdd: number): unknown => {
+export const resolvePreLiveRuleValue = (ruleParameter: string, bot: Bot, game: Game, fallbackOdd?: number): unknown => {
   if (ruleParameter.startsWith('pre:odds:')) {
     const field = ruleParameter.replace('pre:odds:', '');
     return getOddsField(game.preLive.odds, field);

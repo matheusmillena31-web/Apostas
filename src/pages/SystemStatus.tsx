@@ -17,6 +17,13 @@ export function SystemStatus({ bots, logs, results }: SystemStatusProps) {
     () => apiFootballService.buscarStatusProxy(),
     [],
   );
+  const storageStats = proxyStatus?.storageStats;
+  const byQuality = storageStats?.byQuality ?? {};
+  const formatBytes = (bytes?: number) => {
+    if (!bytes) return '-';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  };
 
   return (
     <>
@@ -46,6 +53,40 @@ export function SystemStatus({ bots, logs, results }: SystemStatusProps) {
           O frontend consulta somente o backend local. A chave da API-FOOTBALL fica fora do React e os snapshots gravados em JSONL formam a primeira base historica de odds e jogo.
         </p>
         {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
+      </Card>
+      <Card className="mt-5" title="Armazenamento historico">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <p className="rounded-md bg-ink-900 p-4 text-sm text-slate-300">
+            Modo: <span className="font-semibold text-white">{storageStats?.mode ?? '-'}</span>
+          </p>
+          <p className="rounded-md bg-ink-900 p-4 text-sm text-slate-300">
+            Tamanho estimado: <span className="font-semibold text-white">{formatBytes(storageStats?.payloadBytes)}</span>
+          </p>
+          <p className="rounded-md bg-ink-900 p-4 text-sm text-slate-300">
+            Com odds: <span className="font-semibold text-white">{storageStats?.withOdds ?? 0}</span>
+          </p>
+          <p className="rounded-md bg-ink-900 p-4 text-sm text-slate-300">
+            Com estatisticas: <span className="font-semibold text-white">{storageStats?.withStatistics ?? 0}</span>
+          </p>
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <p className="rounded-md border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
+            Full: <span className="font-semibold text-white">{byQuality.full ?? 0}</span>
+          </p>
+          <p className="rounded-md border border-blue-400/20 bg-blue-400/10 p-4 text-sm text-blue-100">
+            Partial: <span className="font-semibold text-white">{byQuality.partial ?? 0}</span>
+          </p>
+          <p className="rounded-md border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
+            Score only: <span className="font-semibold text-white">{byQuality.score_only ?? 0}</span>
+          </p>
+          <p className="rounded-md border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-100">
+            Empty: <span className="font-semibold text-white">{byQuality.empty ?? 0}</span>
+          </p>
+        </div>
+        <p className="mt-4 text-sm text-slate-400">
+          Snapshots do historico e relatorios de backtest sao armazenamentos separados. Excluir relatorios nao apaga partidas capturadas.
+          {storageStats?.path ? ` Arquivo local: ${storageStats.path}` : ''}
+        </p>
       </Card>
     </>
   );

@@ -37,7 +37,14 @@ const collectorStatePath = resolve(process.cwd(), process.env.API_FOOTBALL_COLLE
 const backtestJobsPath = resolve(process.cwd(), process.env.BACKTEST_JOBS_PATH ?? 'server/storage/backtest-jobs.json');
 const databaseUrl = process.env.DATABASE_URL;
 const databaseSsl = process.env.DATABASE_SSL !== 'false';
-const snapshotStore = createSnapshotStore({ snapshotPath, databaseUrl, databaseSsl });
+const snapshotStore = createSnapshotStore({
+  snapshotPath,
+  databaseUrl,
+  databaseSsl,
+  keepScoreOnly: process.env.SNAPSHOT_KEEP_SCORE_ONLY !== 'false',
+  skipScoreOnlyDuplicates: process.env.SNAPSHOT_SKIP_SCORE_ONLY_DUPLICATES !== 'false',
+  scoreOnlyMinIntervalMs: Number(process.env.SNAPSHOT_SCORE_ONLY_MIN_INTERVAL_MS ?? 600000),
+});
 const backtestJobStore = createBacktestJobStore({ filePath: backtestJobsPath, databaseUrl, databaseSsl });
 const collectorEnabled = process.env.API_FOOTBALL_COLLECTOR_ENABLED !== 'false';
 const collectorIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_INTERVAL_MS ?? 90000);
@@ -169,6 +176,8 @@ const readJsonBody = async (request) => {
 const getSnapshotCount = () => snapshotStore.getSnapshotCount();
 
 const readRawSnapshots = () => snapshotStore.readRawSnapshots();
+
+const getStorageStats = () => snapshotStore.getStorageStats();
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
@@ -317,8 +326,14 @@ const buildReplayGroups = async () => {
       asArray(snapshot.payload?.response).forEach((fixture) => {
         const fixtureId = fixture?.fixture?.id;
         if (!fixtureId) return;
-        ensureGroup(fixtureId).fixtureSnapshots.push({
+        const group = ensureGroup(fixtureId);
+        group.fixtureSnapshots.push({
           capturedAt: snapshot.capturedAt,
+          quality: snapshot.quality ?? 'unknown',
+          hasOdds: snapshot.hasOdds ?? false,
+          hasStatistics: snapshot.hasStatistics ?? false,
+          hasEvents: snapshot.hasEvents ?? false,
+          hasScore: snapshot.hasScore ?? true,
           fixture,
         });
       });
@@ -373,15 +388,21 @@ const buildReplayGame = (group) => {
     snapshotCount: timeline.length,
     minuteFrom: timeline[0]?.minute ?? 0,
     minuteTo: timeline[timeline.length - 1]?.minute ?? 0,
+    quality: group.oddsSnapshots.length > 0 && group.statisticsSnapshots.length > 0 ? 'full' : group.oddsSnapshots.length > 0 || group.statisticsSnapshots.length > 0 || group.eventSnapshots.length > 0 ? 'partial' : 'score_only',
+    hasOdds: group.oddsSnapshots.length > 0,
+    hasStatistics: group.statisticsSnapshots.length > 0,
+    hasEvents: group.eventSnapshots.length > 0,
+    hasScore: true,
   };
 
   return { summary, timeline };
 };
 
-const getReplayGames = async () => {
+const getReplayGames = async ({ includeScoreOnly = false } = {}) => {
   const groups = await buildReplayGroups();
   return groups
     .map(buildReplayGame)
+    .filter((game) => includeScoreOnly || game.summary.quality !== 'score_only')
     .sort((a, b) => new Date(b.summary.lastCapturedAt).getTime() - new Date(a.summary.lastCapturedAt).getTime());
 };
 
@@ -649,6 +670,7 @@ const server = createServer(async (request, response) => {
       backtestJobsPath,
       collectorStatePath,
       snapshotCount: await getSnapshotCount(),
+      storageStats: await getStorageStats(),
       collector: collectorState,
     });
     return;
@@ -750,7 +772,8 @@ const server = createServer(async (request, response) => {
   }
 
   if (incomingUrl.pathname === '/api/football/replay/games') {
-    const games = await getReplayGames();
+    const includeScoreOnly = incomingUrl.searchParams.get('includeScoreOnly') === 'true';
+    const games = await getReplayGames({ includeScoreOnly });
     sendJson(response, 200, {
       ok: true,
       games: games.map((game) => game.summary),
@@ -761,7 +784,7 @@ const server = createServer(async (request, response) => {
   const replayGameMatch = incomingUrl.pathname.match(/^\/api\/football\/replay\/games\/(\d+)$/);
   if (replayGameMatch) {
     const fixtureId = Number(replayGameMatch[1]);
-    const games = await getReplayGames();
+    const games = await getReplayGames({ includeScoreOnly: true });
     const game = games.find((item) => item.summary.fixtureId === fixtureId);
 
     if (!game) {

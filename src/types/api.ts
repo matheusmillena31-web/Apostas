@@ -10,6 +10,20 @@ export interface ApiFootballEnvelope<TResponse> {
   response: TResponse;
 }
 
+export type ApiFootballSnapshotQuality = 'full' | 'partial' | 'score_only' | 'empty' | 'unknown';
+
+export interface ApiFootballStorageStats {
+  mode: 'postgres' | 'jsonl' | 'memory' | string;
+  path?: string;
+  total: number;
+  byQuality: Partial<Record<ApiFootballSnapshotQuality, number>>;
+  withOdds: number;
+  withStatistics: number;
+  withEvents?: number;
+  withScore?: number;
+  payloadBytes?: number;
+}
+
 export interface ApiFootballProxyStatus {
   ok: boolean;
   service: string;
@@ -18,6 +32,7 @@ export interface ApiFootballProxyStatus {
   baseUrl: string;
   snapshotPath: string;
   snapshotCount: number;
+  storageStats?: ApiFootballStorageStats;
 }
 
 export interface ApiFootballLeague {
@@ -243,6 +258,11 @@ export interface ApiFootballReplayGameSummary {
   snapshotCount: number;
   minuteFrom: number;
   minuteTo: number;
+  quality?: ApiFootballSnapshotQuality;
+  hasOdds?: boolean;
+  hasStatistics?: boolean;
+  hasEvents?: boolean;
+  hasScore?: boolean;
 }
 
 export interface ApiFootballReplaySnapshot {

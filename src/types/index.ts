@@ -107,15 +107,15 @@ export interface PreLiveDifferences {
 }
 
 export interface LiveStats {
-  shots: number;
-  shotsOnTarget: number;
-  dangerousAttacks: number;
+  shots?: number;
+  shotsOnTarget?: number;
+  dangerousAttacks?: number;
   attacks?: number;
-  corners: number;
-  possession: number;
-  cards: number;
-  offensivePressure: number;
-  recentShots: number;
+  corners?: number;
+  possession?: number;
+  cards?: number;
+  offensivePressure?: number;
+  recentShots?: number;
   home?: TeamLiveStats;
   away?: TeamLiveStats;
 }
@@ -128,13 +128,13 @@ export interface GameSnapshot {
   scoreAway: number;
   halfTimeScoreHome?: number | null;
   halfTimeScoreAway?: number | null;
-  homeOdd: number;
-  drawOdd: number;
-  awayOdd: number;
-  over15Odd: number;
-  over25Odd: number;
-  under25Odd: number;
-  bttsOdd: number;
+  homeOdd?: number;
+  drawOdd?: number;
+  awayOdd?: number;
+  over15Odd?: number;
+  over25Odd?: number;
+  under25Odd?: number;
+  bttsOdd?: number;
   stats: LiveStats;
   events: string[];
   odds?: HistoricalOdd[];
@@ -151,13 +151,13 @@ export interface Game {
   finalScoreAway: number;
   fixtureDate?: string;
   preLive: {
-    homeOdd: number;
-    drawOdd: number;
-    awayOdd: number;
-    over15Odd: number;
-    over25Odd: number;
-    under25Odd: number;
-    bttsOdd: number;
+    homeOdd?: number;
+    drawOdd?: number;
+    awayOdd?: number;
+    over15Odd?: number;
+    over25Odd?: number;
+    under25Odd?: number;
+    bttsOdd?: number;
     averageGoals?: number;
     averageCorners?: number;
     h2hGoals?: number;

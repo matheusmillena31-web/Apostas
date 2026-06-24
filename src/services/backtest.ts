@@ -3,6 +3,7 @@ import { resolvePreLiveRuleValue } from './preLiveStatsService';
 import { uid } from '../utils/formatters';
 
 const clampOdd = (odd: number) => Number(Math.max(1.01, Math.min(50, odd)).toFixed(2));
+const isRealOdd = (odd: unknown): odd is number => typeof odd === 'number' && Number.isFinite(odd) && odd > 1.01;
 
 const parseGoalMarket = (marketName: string | undefined) => {
   const market = (marketName ?? '').toLowerCase().replace(',', '.');
@@ -82,13 +83,20 @@ const getRawOddForMarket = (marketName: string | undefined, snapshot: GameSnapsh
 
 const getGoalLineOdd = (type: 'over' | 'under', line: number, snapshot: GameSnapshot) => {
   if (type === 'over') {
+    if (snapshot.over15Odd === undefined || snapshot.over25Odd === undefined) return undefined;
     if (line <= 1.5) return clampOdd(snapshot.over15Odd - (1.5 - line) * 0.35);
     if (line <= 2.5) return clampOdd(snapshot.over15Odd + (snapshot.over25Odd - snapshot.over15Odd) * (line - 1.5));
     return clampOdd(snapshot.over25Odd + (line - 2.5) * 0.75);
   }
 
+  if (snapshot.under25Odd === undefined) return undefined;
   if (line <= 2.5) return clampOdd(snapshot.under25Odd + (2.5 - line) * 0.55);
   return clampOdd(snapshot.under25Odd - (line - 2.5) * 0.35);
+};
+
+const getFavoriteSide = (game: Game): 'home' | 'away' | undefined => {
+  if (!isRealOdd(game.preLive.homeOdd) || !isRealOdd(game.preLive.awayOdd)) return undefined;
+  return game.preLive.homeOdd <= game.preLive.awayOdd ? 'home' : 'away';
 };
 
 const getOddForMarket = (marketName: string | undefined, snapshot: GameSnapshot, game: Game) => {
@@ -102,16 +110,22 @@ const getOddForMarket = (marketName: string | undefined, snapshot: GameSnapshot,
   if (market.includes('ambas') || market.includes('btts')) return snapshot.bttsOdd;
   if (market.includes('empate')) return snapshot.drawOdd;
   if (market.includes('favorito') || market.includes('favorite')) {
-    return game.preLive.homeOdd <= game.preLive.awayOdd ? snapshot.homeOdd : snapshot.awayOdd;
+    const favoriteSide = getFavoriteSide(game);
+    return favoriteSide === 'home' ? snapshot.homeOdd : favoriteSide === 'away' ? snapshot.awayOdd : undefined;
   }
   if (market.includes('zebra') || market.includes('underdog')) {
-    return game.preLive.homeOdd <= game.preLive.awayOdd ? snapshot.awayOdd : snapshot.homeOdd;
+    const favoriteSide = getFavoriteSide(game);
+    return favoriteSide === 'home' ? snapshot.awayOdd : favoriteSide === 'away' ? snapshot.homeOdd : undefined;
   }
   if (market.includes('casa') || market.includes('mandante')) return snapshot.homeOdd;
   if (market.includes('fora') || market.includes('visitante')) return snapshot.awayOdd;
-  if (market.includes('dupla chance')) return Math.min(snapshot.homeOdd, snapshot.drawOdd, snapshot.awayOdd);
+  if (market.includes('dupla chance')) {
+    const odds = [snapshot.homeOdd, snapshot.drawOdd, snapshot.awayOdd].filter(isRealOdd);
+    return odds.length ? Math.min(...odds) : undefined;
+  }
 
-  return game.preLive.homeOdd <= game.preLive.awayOdd ? snapshot.homeOdd : snapshot.awayOdd;
+  const favoriteSide = getFavoriteSide(game);
+  return favoriteSide === 'home' ? snapshot.homeOdd : favoriteSide === 'away' ? snapshot.awayOdd : undefined;
 };
 
 const getEntryOdd = (bot: Bot, snapshot: GameSnapshot, game: Game) =>
@@ -135,12 +149,13 @@ const getMarketTotalGoalsAtSnapshot = (bot: Bot, snapshot: GameSnapshot) => {
   return snapshot.scoreHome + snapshot.scoreAway;
 };
 
-const getHomeIsFavorite = (game: Game) => game.preLive.homeOdd <= game.preLive.awayOdd;
+const getHomeIsFavorite = (game: Game) => getFavoriteSide(game) === 'home';
 
 const resolveReference = (reference: string, game: Game): Extract<TeamReference, 'home' | 'away'> | undefined => {
   if (reference === 'home' || reference === 'away') return reference;
-  if (reference === 'favorite') return getHomeIsFavorite(game) ? 'home' : 'away';
-  if (reference === 'underdog') return getHomeIsFavorite(game) ? 'away' : 'home';
+  const favoriteSide = getFavoriteSide(game);
+  if (reference === 'favorite') return favoriteSide;
+  if (reference === 'underdog') return favoriteSide === 'home' ? 'away' : favoriteSide === 'away' ? 'home' : undefined;
   return undefined;
 };
 
@@ -298,15 +313,16 @@ const getMinutesSinceIncrease = (
 
 const getOddsMovementValue = (bot: Bot, game: Game, snapshot: GameSnapshot, snapshotIndex: number, parameter: string) => {
   const currentOdd = getHistoricalOdd(bot, snapshot, game);
-  if (!Number.isFinite(currentOdd) || currentOdd <= 1.01) return undefined;
+  if (!isRealOdd(currentOdd)) return undefined;
 
   if (parameter === 'odds:initial' || parameter === 'odds:diff' || parameter === 'odds:percent') {
     const firstSnapshot = game.snapshots.find((item) => {
       const odd = getHistoricalOdd(bot, item, game);
-      return Number.isFinite(odd) && odd > 1.01;
+      return isRealOdd(odd);
     });
     if (!firstSnapshot) return undefined;
     const initialOdd = getHistoricalOdd(bot, firstSnapshot, game);
+    if (!isRealOdd(initialOdd)) return undefined;
     if (parameter === 'odds:initial') return initialOdd;
     if (parameter === 'odds:diff') return currentOdd - initialOdd;
     return ((currentOdd - initialOdd) / initialOdd) * 100;
@@ -318,7 +334,7 @@ const getOddsMovementValue = (bot: Bot, game: Game, snapshot: GameSnapshot, snap
   const previousSnapshot = getSnapshotAtOrBeforeMinute(game, snapshot.minute - Number(match[2]), snapshotIndex);
   if (!previousSnapshot) return undefined;
   const previousOdd = getHistoricalOdd(bot, previousSnapshot, game);
-  if (!Number.isFinite(previousOdd) || previousOdd <= 1.01) return undefined;
+  if (!isRealOdd(previousOdd)) return undefined;
 
   return match[1] === 'drop' ? Math.max(0, previousOdd - currentOdd) : Math.max(0, currentOdd - previousOdd);
 };
@@ -345,7 +361,19 @@ const toNumber = (value: unknown) => {
 };
 
 const getFavoriteGameSituationValues = (game: Game, snapshot: GameSnapshot) => {
-  const homeIsFavorite = game.preLive.homeOdd <= game.preLive.awayOdd;
+  const favoriteSide = getFavoriteSide(game);
+  if (!favoriteSide) {
+    return {
+      favoriteSide: 'any',
+      gameDraw: snapshot.scoreHome === snapshot.scoreAway ? 0 : undefined,
+      favoriteWinningGoalDiff: undefined,
+      favoriteNotLosingGoalDiff: undefined,
+      underdogWinningGoalDiff: undefined,
+      underdogNotLosingGoalDiff: undefined,
+      anyTeamWinningGoalDiff: Math.abs(snapshot.scoreHome - snapshot.scoreAway) || undefined,
+    };
+  }
+  const homeIsFavorite = favoriteSide === 'home';
   const favoriteScore = homeIsFavorite ? snapshot.scoreHome : snapshot.scoreAway;
   const underdogScore = homeIsFavorite ? snapshot.scoreAway : snapshot.scoreHome;
   const diff = Math.abs(snapshot.scoreHome - snapshot.scoreAway);
@@ -380,7 +408,7 @@ const getReferenceConcededChange = (currentSnapshot: GameSnapshot, previousSnaps
   return Math.max(0, currentScore - previousScore);
 };
 
-const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapshot, odd: number, snapshotIndex: number): unknown => {
+const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapshot, odd: number | undefined, snapshotIndex: number): unknown => {
   const stats = snapshot.stats;
 
   if (rule.mode === 'live') {
@@ -438,14 +466,14 @@ const getRuleValue = (rule: BotRule, bot: Bot, game: Game, snapshot: GameSnapsho
       possession: stats.possession,
       shots: stats.shots,
       shotsOnTarget: stats.shotsOnTarget,
-      attacks: stats.attacks ?? stats.shots + stats.dangerousAttacks,
+      attacks: stats.attacks ?? (typeof stats.shots === 'number' && typeof stats.dangerousAttacks === 'number' ? stats.shots + stats.dangerousAttacks : undefined),
       dangerousAttacks: stats.dangerousAttacks,
       cards: stats.cards,
       substitutions: undefined,
       offensivePressure: stats.offensivePressure,
       recentEvents: snapshot.events.join(' '),
       liveOdds: odd,
-      statDifference: Math.abs(stats.shots - stats.shotsOnTarget),
+      statDifference: typeof stats.shots === 'number' && typeof stats.shotsOnTarget === 'number' ? Math.abs(stats.shots - stats.shotsOnTarget) : undefined,
       favoriteWinning: getReferenceState(snapshot, game, 'favorite', 'Winning'),
       favoriteDrawing: getReferenceState(snapshot, game, 'favorite', 'Drawing'),
       favoriteLosing: getReferenceState(snapshot, game, 'favorite', 'Losing'),
@@ -510,7 +538,7 @@ const compareRule = (actual: unknown, rule: BotRule) => {
   return rule.operator === '>=' ? actualNumber >= expectedNumber : actualNumber <= expectedNumber;
 };
 
-const evaluateRuleList = (rules: BotRule[], bot: Bot, game: Game, snapshot: GameSnapshot, odd: number, snapshotIndex: number) => {
+const evaluateRuleList = (rules: BotRule[], bot: Bot, game: Game, snapshot: GameSnapshot, odd: number | undefined, snapshotIndex: number) => {
   const evaluations = rules.map((rule) => ({
     rule,
     passed: compareRule(getRuleValue(rule, bot, game, snapshot, odd, snapshotIndex), rule),
@@ -536,14 +564,14 @@ const evaluateRuleList = (rules: BotRule[], bot: Bot, game: Game, snapshot: Game
   };
 };
 
-const evaluateDynamicRules = (bot: Bot, game: Game, snapshot: GameSnapshot, odd: number, snapshotIndex: number) => {
+const evaluateDynamicRules = (bot: Bot, game: Game, snapshot: GameSnapshot, odd: number | undefined, snapshotIndex: number) => {
   const rules = bot.rules.filter((rule) => rule.parameter && (bot.mode === 'live' || rule.mode === bot.mode));
   if (rules.length === 0) return { passed: true, reason: 'Sem parâmetros obrigatórios' };
   return evaluateRuleList(rules, bot, game, snapshot, odd, snapshotIndex);
 };
 
-const passesOddFilter = (bot: Bot, odd: number) => {
-  if (!Number.isFinite(odd) || odd <= 1.01) return { passed: false, reason: 'Odd historica indisponivel neste snapshot' };
+const passesOddFilter = (bot: Bot, odd: number | undefined) => {
+  if (!isRealOdd(odd)) return { passed: false, reason: 'Odd historica indisponivel neste snapshot' };
   if (bot.minOdd !== undefined && odd < bot.minOdd) return { passed: false, reason: 'Odd abaixo da mínima configurada' };
   if (bot.maxOdd !== undefined && odd > bot.maxOdd) return { passed: false, reason: 'Odd acima da máxima configurada' };
   return { passed: true, reason: 'Odd dentro do intervalo' };
@@ -567,6 +595,7 @@ export const shouldEnter = (bot: Bot, game: Game, snapshot: GameSnapshot, snapsh
 
   const entryOddFilter = passesOddFilter(bot, odd);
   if (!entryOddFilter.passed) return { passed: false, odd, reason: entryOddFilter.reason };
+  if (!isRealOdd(odd)) return { passed: false, odd, reason: 'Odd historica indisponivel neste snapshot' };
 
   const oddFilter = passesOddFilter(bot, filterOdd);
   if (!oddFilter.passed) return { passed: false, odd, reason: oddFilter.reason };
@@ -797,7 +826,7 @@ const getCashOut = (bot: Bot, game: Game, entrySnapshot: GameSnapshot, entryInde
     if (isMarketSettledAtSnapshot(bot, snapshot)) return undefined;
 
     const currentOdd = getEntryOdd(bot, snapshot, game);
-    if (!Number.isFinite(currentOdd) || currentOdd <= 1.01) continue;
+    if (!isRealOdd(currentOdd)) continue;
 
     const evaluation = evaluateCashOutRules(exitRules, bot, game, entrySnapshot, snapshot, entryOdd, currentOdd, entryIndex, snapshotIndex, cashOut.exitLogic);
     if (evaluation.passed) return { snapshot, odd: currentOdd, evaluation };
@@ -835,8 +864,9 @@ const getRawMarketGreen = (bot: Bot, game: Game) => {
   if (market.includes('ambas')) return game.finalScoreHome > 0 && game.finalScoreAway > 0;
   if (market.includes('empate')) return game.finalScoreHome === game.finalScoreAway;
 
-  const favoriteIsHome = game.preLive.homeOdd <= game.preLive.awayOdd;
-  return favoriteIsHome ? game.finalScoreHome > game.finalScoreAway : game.finalScoreAway > game.finalScoreHome;
+  const favoriteSide = getFavoriteSide(game);
+  if (!favoriteSide) return false;
+  return favoriteSide === 'home' ? game.finalScoreHome > game.finalScoreAway : game.finalScoreAway > game.finalScoreHome;
 };
 
 const settleTrade = (bot: Bot, game: Game, odd: number) => {
@@ -890,7 +920,7 @@ export const runBacktest = (bot: Bot, games: Game[] = []): { result: BacktestRes
         reason: decision.reason,
       });
 
-      if (decision.passed) {
+      if (decision.passed && isRealOdd(decision.odd)) {
         const cashOut = getCashOut(backtestBot, game, snapshot, snapshotIndex, decision.odd);
         const settled = cashOut ? settleCashOut(backtestBot, decision.odd, cashOut.odd) : settleTrade(backtestBot, game, decision.odd);
         entries.push({

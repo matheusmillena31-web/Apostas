@@ -89,12 +89,17 @@ API_FOOTBALL_COLLECTOR_HALFTIME_INTERVAL_MS=240000
 API_FOOTBALL_COLLECTOR_STATS_ENABLED=true
 API_FOOTBALL_COLLECTOR_EVENTS_ENABLED=true
 API_FOOTBALL_COLLECTOR_ODDS_ENABLED=true
+SNAPSHOT_KEEP_SCORE_ONLY=true
+SNAPSHOT_SKIP_SCORE_ONLY_DUPLICATES=true
+SNAPSHOT_SCORE_ONLY_MIN_INTERVAL_MS=600000
 BACKEND_ALLOWED_ORIGIN=https://seu-site.vercel.app
 ```
 
 O Render fornece a porta automaticamente pela variavel `PORT`, entao nao precisa configurar `BACKEND_PORT` la. Use `BACKEND_PORT=3333` apenas localmente ou em hospedagens que nao fornecem `PORT`.
 
 Use uma chave nova da API-Football se a chave anterior ja foi compartilhada em conversas, prints ou logs.
+
+Por padrao, jogos com apenas placar continuam sendo guardados, mas de forma resumida e sem repetir snapshots identicos em intervalos curtos. Isso preserva historico simples de resultado final sem ocupar o mesmo espaco de jogos com odds e estatisticas.
 
 ### Banco historico PostgreSQL
 

@@ -3,7 +3,6 @@ import { enrichGamesWithHistoricalPreLiveStats } from './historicalStatsService'
 import { Game, GameSnapshot, LiveStats, TeamLiveStats } from '../types';
 import { ApiFootballOddsBet, ApiFootballReplayGame, ApiFootballReplaySnapshot } from '../types/api';
 
-const FALLBACK_ODD = 1.01;
 const MAX_REPLAY_GAMES = 200;
 const REPLAY_GAME_CONCURRENCY = 8;
 
@@ -82,14 +81,22 @@ const findMarketOdd = (
   return undefined;
 };
 
-const sumStat = (snapshot: ApiFootballReplaySnapshot, labels: string[]) =>
-  snapshot.statistics?.reduce((sum, teamStats) => {
+const sumStat = (snapshot: ApiFootballReplaySnapshot, labels: string[]) => {
+  let found = false;
+  const sum = snapshot.statistics?.reduce((total, teamStats) => {
     const item = teamStats.statistics?.find((stat) =>
       labels.some((label) => normalizeText(stat.type) === normalizeText(label)),
     );
 
-    return sum + toNumber(item?.value, 0);
-  }, 0) ?? 0;
+    if (item?.value === undefined || item.value === null) return total;
+    const value = toNumber(item.value, Number.NaN);
+    if (!Number.isFinite(value)) return total;
+    found = true;
+    return total + value;
+  }, 0);
+
+  return found ? sum : undefined;
+};
 
 const getTeamStat = (snapshot: ApiFootballReplaySnapshot, teamId: number | undefined, labels: string[]) => {
   if (!teamId) return undefined;
@@ -136,6 +143,14 @@ const buildStats = (snapshot: ApiFootballReplaySnapshot): LiveStats => {
   const possession = sumStat(snapshot, ['Ball Possession', 'Posse de Bola']);
   const yellowCards = sumStat(snapshot, ['Yellow Cards', 'Cartoes Amarelos']);
   const redCards = sumStat(snapshot, ['Red Cards', 'Cartoes Vermelhos']);
+  const cards =
+    yellowCards === undefined && redCards === undefined
+      ? undefined
+      : (yellowCards ?? 0) + (redCards ?? 0);
+  const offensivePressure =
+    dangerousAttacks === undefined && shotsOnTarget === undefined
+      ? undefined
+      : (dangerousAttacks ?? 0) + (shotsOnTarget ?? 0);
 
   return {
     shots,
@@ -144,8 +159,8 @@ const buildStats = (snapshot: ApiFootballReplaySnapshot): LiveStats => {
     attacks,
     corners,
     possession,
-    cards: yellowCards + redCards,
-    offensivePressure: dangerousAttacks + shotsOnTarget,
+    cards,
+    offensivePressure,
     recentShots: shots,
     home,
     away,
@@ -153,13 +168,13 @@ const buildStats = (snapshot: ApiFootballReplaySnapshot): LiveStats => {
 };
 
 const getSnapshotOdds = (snapshot: ApiFootballReplaySnapshot, previous?: GameSnapshot) => ({
-  homeOdd: findMarketOdd(snapshot, isMatchOddsMarket, ['home', '1']) ?? previous?.homeOdd ?? FALLBACK_ODD,
-  drawOdd: findMarketOdd(snapshot, isMatchOddsMarket, ['draw', 'x', 'empate']) ?? previous?.drawOdd ?? FALLBACK_ODD,
-  awayOdd: findMarketOdd(snapshot, isMatchOddsMarket, ['away', '2']) ?? previous?.awayOdd ?? FALLBACK_ODD,
-  over15Odd: findMarketOdd(snapshot, isGoalLineMarket, ['over', 'mais'], 1.5) ?? previous?.over15Odd ?? FALLBACK_ODD,
-  over25Odd: findMarketOdd(snapshot, isGoalLineMarket, ['over', 'mais'], 2.5) ?? previous?.over25Odd ?? FALLBACK_ODD,
-  under25Odd: findMarketOdd(snapshot, isGoalLineMarket, ['under', 'menos'], 2.5) ?? previous?.under25Odd ?? FALLBACK_ODD,
-  bttsOdd: findMarketOdd(snapshot, isBothTeamsScoreMarket, ['yes', 'sim']) ?? previous?.bttsOdd ?? FALLBACK_ODD,
+  homeOdd: findMarketOdd(snapshot, isMatchOddsMarket, ['home', '1']) ?? previous?.homeOdd,
+  drawOdd: findMarketOdd(snapshot, isMatchOddsMarket, ['draw', 'x', 'empate']) ?? previous?.drawOdd,
+  awayOdd: findMarketOdd(snapshot, isMatchOddsMarket, ['away', '2']) ?? previous?.awayOdd,
+  over15Odd: findMarketOdd(snapshot, isGoalLineMarket, ['over', 'mais'], 1.5) ?? previous?.over15Odd,
+  over25Odd: findMarketOdd(snapshot, isGoalLineMarket, ['over', 'mais'], 2.5) ?? previous?.over25Odd,
+  under25Odd: findMarketOdd(snapshot, isGoalLineMarket, ['under', 'menos'], 2.5) ?? previous?.under25Odd,
+  bttsOdd: findMarketOdd(snapshot, isBothTeamsScoreMarket, ['yes', 'sim']) ?? previous?.bttsOdd,
 });
 
 const convertSnapshot = (snapshot: ApiFootballReplaySnapshot, previous?: GameSnapshot): GameSnapshot => ({
