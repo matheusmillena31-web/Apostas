@@ -72,6 +72,8 @@ const oddMarkets = [
   'Odd - Casa',
   'Odd - Empate',
   'Odd - Fora',
+  'Odd - Favorito',
+  'Odd - Zebra',
   ...goalLines.flatMap((line) => [`Odd - Over Gol (+ ${line}G)`, `Odd - Under Gol (+ ${line}G)`]),
   ...firstHalfGoalLines.flatMap((line) => [`Odd - Over ${line} HT`, `Odd - Under ${line} HT`]),
   'Odd - BTTS Sim',

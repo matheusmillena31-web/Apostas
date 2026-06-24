@@ -101,6 +101,12 @@ const getOddForMarket = (marketName: string | undefined, snapshot: GameSnapshot,
   if (goalMarket) return getGoalLineOdd(goalMarket.type, goalMarket.line, snapshot);
   if (market.includes('ambas') || market.includes('btts')) return snapshot.bttsOdd;
   if (market.includes('empate')) return snapshot.drawOdd;
+  if (market.includes('favorito') || market.includes('favorite')) {
+    return game.preLive.homeOdd <= game.preLive.awayOdd ? snapshot.homeOdd : snapshot.awayOdd;
+  }
+  if (market.includes('zebra') || market.includes('underdog')) {
+    return game.preLive.homeOdd <= game.preLive.awayOdd ? snapshot.awayOdd : snapshot.homeOdd;
+  }
   if (market.includes('casa') || market.includes('mandante')) return snapshot.homeOdd;
   if (market.includes('fora') || market.includes('visitante')) return snapshot.awayOdd;
   if (market.includes('dupla chance')) return Math.min(snapshot.homeOdd, snapshot.drawOdd, snapshot.awayOdd);
