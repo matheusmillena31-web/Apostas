@@ -10,8 +10,6 @@ import { Dashboard } from './pages/Dashboard';
 import { BotsPage, duplicateBot } from './pages/BotsPage';
 import { BotEditor } from './pages/BotEditor';
 import { LiveGames } from './pages/LiveGames';
-import { GameLists } from './pages/GameLists';
-import { TradingExecution } from './pages/TradingExecution';
 import { BacktestPage } from './pages/BacktestPage';
 import { ReplayPage } from './pages/ReplayPage';
 import { Reports } from './pages/Reports';
@@ -22,8 +20,6 @@ export type PageKey =
   | 'dashboard'
   | 'bots'
   | 'liveGames'
-  | 'gameLists'
-  | 'trading'
   | 'backtest'
   | 'replay'
   | 'reports'
@@ -34,8 +30,6 @@ const titles: Record<PageKey, string> = {
   dashboard: 'Dashboard',
   bots: 'Bots',
   liveGames: 'Jogos ao vivo',
-  gameLists: 'Listas de jogos',
-  trading: 'Trading em execucao',
   backtest: 'Backtest',
   replay: 'Replay de jogos',
   reports: 'Relatorios',
@@ -164,12 +158,20 @@ export default function App() {
     const pendingCount = backtestJobs.filter((job) => job.status === 'pending' || job.status === 'processing').length;
     if (pendingCount >= 10) {
       window.alert('Limite de 10 relatorios aguardando/processando atingido.');
-      return;
+      return false;
     }
 
     const { jobs } = await backtestJobRepository.create(bot);
     applyBacktestJobs(jobs);
     setPage('backtest');
+    return true;
+  };
+
+  const generateBacktestReport = async (bot: Bot) => {
+    const created = await runBotBacktest(bot);
+    if (!created) return;
+    setEditingBot(undefined);
+    setBotEditorOpen(false);
   };
 
   useEffect(() => {
@@ -227,7 +229,7 @@ export default function App() {
         return <Dashboard bots={bots} results={results} onCreateBot={openBotCreator} />;
       case 'bots':
         return botEditorOpen ? (
-          <BotEditor bot={editingBot} defaultStake={settings.defaultStake} onSave={saveBot} />
+          <BotEditor bot={editingBot} defaultStake={settings.defaultStake} onSave={saveBot} onGenerateReport={generateBacktestReport} />
         ) : (
           <BotsPage
             bots={bots}
@@ -245,10 +247,6 @@ export default function App() {
         );
       case 'liveGames':
         return <LiveGames bots={bots} />;
-      case 'gameLists':
-        return <GameLists />;
-      case 'trading':
-        return <TradingExecution bots={bots} />;
       case 'backtest':
         return (
           <BacktestPage

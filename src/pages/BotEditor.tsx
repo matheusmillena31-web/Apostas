@@ -6,16 +6,17 @@ type BotEditorProps = {
   bot?: Bot;
   defaultStake: number;
   onSave: (bot: Bot) => void;
+  onGenerateReport: (bot: Bot) => void;
 };
 
-export function BotEditor({ bot, defaultStake, onSave }: BotEditorProps) {
+export function BotEditor({ bot, defaultStake, onSave, onGenerateReport }: BotEditorProps) {
   return (
     <>
       <PageHeader
         title={bot ? 'Editar Bot' : 'Criar Bot'}
         description="Crie métodos de trade esportivo para simulação, replay e backtest usando regras dinâmicas."
       />
-      <BotForm initialBot={bot} defaultStake={defaultStake} onSave={onSave} />
+      <BotForm initialBot={bot} defaultStake={defaultStake} onSave={onSave} onGenerateReport={onGenerateReport} />
     </>
   );
 }

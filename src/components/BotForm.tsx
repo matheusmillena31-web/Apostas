@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowLeftRight, Plus, Save, X } from 'lucide-react';
+import { ArrowLeftRight, FileBarChart, Plus, Save, X } from 'lucide-react';
 import { Bot, BotMode, BotRule, BotRuleConnector, BotRuleOperator } from '../types';
 import { apiFootballService } from '../services/apiFootball';
 import {
@@ -20,6 +20,7 @@ type BotFormProps = {
   initialBot?: Bot;
   defaultStake: number;
   onSave: (bot: Bot) => void;
+  onGenerateReport?: (bot: Bot) => void;
 };
 
 const gameSituationParameters: ParameterOption[] = [
@@ -933,7 +934,7 @@ function LeagueSelector({
   );
 }
 
-export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
+export function BotForm({ initialBot, defaultStake, onSave, onGenerateReport }: BotFormProps) {
   const defaultBot = createDefaultBot(defaultStake);
   const [leagueOptions, setLeagueOptions] = useState<LeagueOption[]>(fallbackLeagueOptions);
   const [loadingLeagues, setLoadingLeagues] = useState(false);
@@ -1133,17 +1134,16 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
     });
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  const buildBotConfig = (transient = false): Bot => {
     const now = new Date().toISOString();
     const market = bot.market || bot.oddMarket;
     const rules = bot.rules.filter((rule) => rule.parameter);
 
-    onSave({
+    return {
       ...bot,
-      name: String(form.get('name') ?? '').trim() || 'Metodo sem nome',
-      description: String(form.get('description') ?? ''),
+      id: transient ? uid('report-bot') : bot.id,
+      name: bot.name.trim() || 'Metodo sem nome',
+      description: bot.description ?? '',
       isActive: true,
       mode: getModeForRules(rules),
       market: market || undefined,
@@ -1161,8 +1161,17 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
         exitRules: bot.cashOut?.exitRules?.filter((rule) => rule.parameter) ?? [],
       },
       updatedAt: now,
-      createdAt: bot.createdAt || now,
-    });
+      createdAt: transient ? now : bot.createdAt || now,
+    };
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSave(buildBotConfig(false));
+  };
+
+  const handleGenerateReport = () => {
+    onGenerateReport?.(buildBotConfig(true));
   };
 
   return (
@@ -1352,10 +1361,15 @@ export function BotForm({ initialBot, defaultStake, onSave }: BotFormProps) {
         </div>
       </section>
 
-      <div className="flex justify-center">
+      <div className="flex flex-wrap justify-center gap-3">
         <Button type="submit" icon={<Save className="h-4 w-4" />} className="bg-violet-600 hover:bg-violet-500">
           Salvar
         </Button>
+        {onGenerateReport && (
+          <Button type="button" variant="secondary" icon={<FileBarChart className="h-4 w-4" />} onClick={handleGenerateReport}>
+            Gerar relatorio
+          </Button>
+        )}
       </div>
     </form>
   );
