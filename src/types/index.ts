@@ -281,6 +281,12 @@ export interface BacktestJob {
   accuracy?: number;
   profit?: number;
   roi?: number;
+  automation?: {
+    source: 'autonomous';
+    hash: string;
+    baseBotId?: string;
+    variantIndex?: number;
+  };
 }
 
 export interface BotLog {

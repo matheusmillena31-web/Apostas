@@ -198,6 +198,14 @@ export const normalizeBacktestJob = (payload: unknown): BacktestJob => {
     accuracy: typeof item.accuracy === 'number' ? item.accuracy : getAccuracy(result),
     profit: typeof item.profit === 'number' ? item.profit : result?.profit,
     roi: typeof item.roi === 'number' ? item.roi : result?.roi,
+    automation: item.automation?.source === 'autonomous'
+      ? {
+          source: 'autonomous',
+          hash: String(item.automation.hash ?? ''),
+          baseBotId: item.automation.baseBotId ? String(item.automation.baseBotId) : undefined,
+          variantIndex: typeof item.automation.variantIndex === 'number' ? item.automation.variantIndex : undefined,
+        }
+      : undefined,
   };
 };
 

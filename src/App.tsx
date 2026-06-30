@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { runBacktest } from './services/backtest';
+import { buildAutonomousReportVariants, createAutonomousReportHash } from './services/autonomousReportGenerator';
 import { backtestJobRepository } from './services/backtestJobRepository';
 import { loadHistoricalBacktestGames } from './services/replayToBacktest';
 import { storage } from './services/storage';
@@ -174,6 +175,42 @@ export default function App() {
     setBotEditorOpen(false);
   };
 
+  const generateAutonomousReports = async (bot: Bot) => {
+    const pendingCount = backtestJobs.filter((job) => job.status === 'pending' || job.status === 'processing').length;
+    const availableSlots = Math.max(0, 10 - pendingCount);
+    if (availableSlots <= 0) {
+      window.alert('Limite de 10 relatorios aguardando/processando atingido.');
+      return false;
+    }
+
+    const batch = buildAutonomousReportVariants(bot, backtestJobs, Math.min(10, availableSlots));
+    if (batch.variants.length === 0) {
+      window.alert('Nao foi encontrada uma variacao inedita para estes parametros.');
+      return false;
+    }
+
+    let jobsSnapshot = backtestJobs;
+    for (const [index, variant] of batch.variants.entries()) {
+      const { job } = await backtestJobRepository.create(variant);
+      jobsSnapshot = await backtestJobRepository.patch(job.id, {
+        name: `${variant.name} - ${new Date(job.createdAt).toLocaleString('pt-BR')}`,
+        createdBy: 'Automatico',
+        automation: {
+          source: 'autonomous',
+          hash: createAutonomousReportHash(variant),
+          baseBotId: bot.id,
+          variantIndex: index + 1,
+        },
+      });
+    }
+
+    applyBacktestJobs(jobsSnapshot);
+    setEditingBot(undefined);
+    setBotEditorOpen(false);
+    setPage('backtest');
+    return true;
+  };
+
   useEffect(() => {
     const nextJob = backtestJobs.find((job) => {
       if (job.status !== 'pending') return false;
@@ -229,7 +266,7 @@ export default function App() {
         return <Dashboard bots={bots} results={results} onCreateBot={openBotCreator} />;
       case 'bots':
         return botEditorOpen ? (
-          <BotEditor bot={editingBot} defaultStake={settings.defaultStake} onSave={saveBot} onGenerateReport={generateBacktestReport} />
+          <BotEditor bot={editingBot} defaultStake={settings.defaultStake} onSave={saveBot} onGenerateReport={generateBacktestReport} onGenerateAutonomousReports={generateAutonomousReports} />
         ) : (
           <BotsPage
             bots={bots}
@@ -243,6 +280,7 @@ export default function App() {
             onDelete={deleteBot}
             onDuplicate={duplicate}
             onBacktest={runBotBacktest}
+            onGenerateReports={generateAutonomousReports}
           />
         );
       case 'liveGames':

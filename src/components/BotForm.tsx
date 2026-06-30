@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowLeftRight, FileBarChart, Plus, Save, X } from 'lucide-react';
+import { ArrowLeftRight, FileBarChart, Plus, Save, Wand2, X } from 'lucide-react';
 import { Bot, BotMode, BotRule, BotRuleConnector, BotRuleOperator } from '../types';
 import { apiFootballService } from '../services/apiFootball';
 import {
@@ -21,6 +21,7 @@ type BotFormProps = {
   defaultStake: number;
   onSave: (bot: Bot) => void;
   onGenerateReport?: (bot: Bot) => void;
+  onGenerateAutonomousReports?: (bot: Bot) => void;
 };
 
 const gameSituationParameters: ParameterOption[] = [
@@ -934,7 +935,7 @@ function LeagueSelector({
   );
 }
 
-export function BotForm({ initialBot, defaultStake, onSave, onGenerateReport }: BotFormProps) {
+export function BotForm({ initialBot, defaultStake, onSave, onGenerateReport, onGenerateAutonomousReports }: BotFormProps) {
   const defaultBot = createDefaultBot(defaultStake);
   const [leagueOptions, setLeagueOptions] = useState<LeagueOption[]>(fallbackLeagueOptions);
   const [loadingLeagues, setLoadingLeagues] = useState(false);
@@ -1174,6 +1175,10 @@ export function BotForm({ initialBot, defaultStake, onSave, onGenerateReport }: 
     onGenerateReport?.(buildBotConfig(true));
   };
 
+  const handleGenerateAutonomousReports = () => {
+    onGenerateAutonomousReports?.(buildBotConfig(true));
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
       <Card title="Identidade do metodo" subtitle="Defina nome e modo operacional. Bots salvos ficam ativos para simulacoes.">
@@ -1368,6 +1373,11 @@ export function BotForm({ initialBot, defaultStake, onSave, onGenerateReport }: 
         {onGenerateReport && (
           <Button type="button" variant="secondary" icon={<FileBarChart className="h-4 w-4" />} onClick={handleGenerateReport}>
             Gerar relatorio
+          </Button>
+        )}
+        {onGenerateAutonomousReports && (
+          <Button type="button" variant="secondary" icon={<Wand2 className="h-4 w-4" />} onClick={handleGenerateAutonomousReports}>
+            Gerar variacoes
           </Button>
         )}
       </div>

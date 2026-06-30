@@ -1,4 +1,4 @@
-import { Copy, Pencil, Play, Trash2 } from 'lucide-react';
+import { Copy, Pencil, Play, Trash2, Wand2 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
@@ -14,6 +14,7 @@ type BotsPageProps = {
   onDelete: (botId: string) => void;
   onDuplicate: (bot: Bot) => void;
   onBacktest: (bot: Bot) => void;
+  onGenerateReports: (bot: Bot) => void;
 };
 
 export function duplicateBot(bot: Bot): Bot {
@@ -27,7 +28,7 @@ export function duplicateBot(bot: Bot): Bot {
   };
 }
 
-export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicate, onBacktest }: BotsPageProps) {
+export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicate, onBacktest, onGenerateReports }: BotsPageProps) {
   const resultByBot = new Map(results.map((result) => [result.botId, result]));
 
   return (
@@ -99,6 +100,7 @@ export function BotsPage({ bots, results, onCreate, onEdit, onDelete, onDuplicat
                           <Button variant="ghost" className="px-2" title="Editar" onClick={() => onEdit(bot)} icon={<Pencil className="h-4 w-4" />} />
                           <Button variant="ghost" className="px-2" title="Duplicar" onClick={() => onDuplicate(bot)} icon={<Copy className="h-4 w-4" />} />
                           <Button variant="ghost" className="px-2" title="Rodar backtest" onClick={() => onBacktest(bot)} icon={<Play className="h-4 w-4" />} />
+                          <Button variant="ghost" className="px-2" title="Gerar variacoes automaticas" onClick={() => onGenerateReports(bot)} icon={<Wand2 className="h-4 w-4" />} />
                           <Button variant="danger" className="px-2" title="Excluir" onClick={() => onDelete(bot.id)} icon={<Trash2 className="h-4 w-4" />} />
                         </div>
                       </td>
