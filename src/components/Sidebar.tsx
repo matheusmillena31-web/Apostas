@@ -7,6 +7,7 @@ import {
   PlayCircle,
   Radio,
   Trophy,
+  Wand2,
 } from 'lucide-react';
 import type { PageKey } from '../App';
 
@@ -19,6 +20,7 @@ const items: Array<{ key: PageKey; label: string; icon: React.ElementType }> = [
   { key: 'dashboard', label: 'Dashboard', icon: Home },
   { key: 'bots', label: 'Bots', icon: Bot },
   { key: 'liveGames', label: 'Jogos ao vivo', icon: Radio },
+  { key: 'reportGenerator', label: 'Gerador de Relatorios', icon: Wand2 },
   { key: 'backtest', label: 'Backtest', icon: BarChart3 },
   { key: 'replay', label: 'Replay de jogos', icon: PlayCircle },
   { key: 'reports', label: 'Relatorios', icon: LineChart },

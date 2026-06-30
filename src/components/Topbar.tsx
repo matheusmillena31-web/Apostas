@@ -11,6 +11,7 @@ const mobileItems: Array<{ key: PageKey; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'bots', label: 'Bots' },
   { key: 'liveGames', label: 'Jogos ao vivo' },
+  { key: 'reportGenerator', label: 'Gerador' },
   { key: 'backtest', label: 'Backtest' },
   { key: 'reports', label: 'Relatorios' },
   { key: 'status', label: 'Status' },

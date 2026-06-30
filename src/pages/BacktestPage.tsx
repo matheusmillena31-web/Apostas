@@ -19,7 +19,7 @@ type BacktestPageProps = {
 type SortKey = 'name' | 'type' | 'market' | 'accuracy' | 'entries' | 'profit' | 'createdAt' | 'scheduledFor' | 'status';
 
 const PAGE_SIZE = 10;
-const MAX_PENDING_JOBS = 10;
+const MAX_PENDING_JOBS = 20;
 
 type WalletPoint = {
   entrada: string;

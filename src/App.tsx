@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { runBacktest } from './services/backtest';
-import { buildAutonomousReportVariants, createAutonomousReportHash } from './services/autonomousReportGenerator';
+import { buildAutonomousReportVariants, buildMarketAutonomousReportVariants, createAutonomousReportHash } from './services/autonomousReportGenerator';
 import { backtestJobRepository } from './services/backtestJobRepository';
 import { loadHistoricalBacktestGames } from './services/replayToBacktest';
 import { storage } from './services/storage';
@@ -13,6 +13,7 @@ import { BotEditor } from './pages/BotEditor';
 import { LiveGames } from './pages/LiveGames';
 import { BacktestPage } from './pages/BacktestPage';
 import { ReplayPage } from './pages/ReplayPage';
+import { ReportGenerator } from './pages/ReportGenerator';
 import { Reports } from './pages/Reports';
 import { Ranking } from './pages/Ranking';
 import { SystemStatus } from './pages/SystemStatus';
@@ -21,6 +22,7 @@ export type PageKey =
   | 'dashboard'
   | 'bots'
   | 'liveGames'
+  | 'reportGenerator'
   | 'backtest'
   | 'replay'
   | 'reports'
@@ -31,6 +33,7 @@ const titles: Record<PageKey, string> = {
   dashboard: 'Dashboard',
   bots: 'Bots',
   liveGames: 'Jogos ao vivo',
+  reportGenerator: 'Gerador de Relatorios',
   backtest: 'Backtest',
   replay: 'Replay de jogos',
   reports: 'Relatorios',
@@ -53,6 +56,7 @@ export default function App() {
   const historicalGamesRef = useRef<Game[]>([]);
   const historicalGamesPromiseRef = useRef<Promise<Game[]> | undefined>(undefined);
   const processingJobIdRef = useRef<string | undefined>(undefined);
+  const maxPendingReports = 20;
 
   const applyBacktestJobs = (jobs: BacktestJob[]) => {
     setBacktestJobs(jobs);
@@ -157,8 +161,8 @@ export default function App() {
 
   const runBotBacktest = async (bot: Bot) => {
     const pendingCount = backtestJobs.filter((job) => job.status === 'pending' || job.status === 'processing').length;
-    if (pendingCount >= 10) {
-      window.alert('Limite de 10 relatorios aguardando/processando atingido.');
+    if (pendingCount >= maxPendingReports) {
+      window.alert(`Limite de ${maxPendingReports} relatorios aguardando/processando atingido.`);
       return false;
     }
 
@@ -177,13 +181,13 @@ export default function App() {
 
   const generateAutonomousReports = async (bot: Bot) => {
     const pendingCount = backtestJobs.filter((job) => job.status === 'pending' || job.status === 'processing').length;
-    const availableSlots = Math.max(0, 10 - pendingCount);
+    const availableSlots = Math.max(0, maxPendingReports - pendingCount);
     if (availableSlots <= 0) {
-      window.alert('Limite de 10 relatorios aguardando/processando atingido.');
+      window.alert(`Limite de ${maxPendingReports} relatorios aguardando/processando atingido.`);
       return false;
     }
 
-    const batch = buildAutonomousReportVariants(bot, backtestJobs, Math.min(10, availableSlots));
+    const batch = buildAutonomousReportVariants(bot, backtestJobs, Math.min(maxPendingReports, availableSlots));
     if (batch.variants.length === 0) {
       window.alert('Nao foi encontrada uma variacao inedita para estes parametros.');
       return false;
@@ -209,6 +213,42 @@ export default function App() {
     setBotEditorOpen(false);
     setPage('backtest');
     return true;
+  };
+
+  const createJobsFromVariants = async (variants: Bot[], baseBotId?: string) => {
+    let jobsSnapshot = backtestJobs;
+    for (const [index, variant] of variants.entries()) {
+      const { job } = await backtestJobRepository.create(variant);
+      jobsSnapshot = await backtestJobRepository.patch(job.id, {
+        name: `${variant.name} - ${new Date(job.createdAt).toLocaleString('pt-BR')}`,
+        createdBy: 'Automatico',
+        automation: {
+          source: 'autonomous',
+          hash: createAutonomousReportHash(variant),
+          baseBotId,
+          variantIndex: index + 1,
+        },
+      });
+    }
+    applyBacktestJobs(jobsSnapshot);
+    setPage('backtest');
+  };
+
+  const generateMarketReports = async (marketValue: string, quantity: number) => {
+    const pendingCount = backtestJobs.filter((job) => job.status === 'pending' || job.status === 'processing').length;
+    const availableSlots = Math.max(0, maxPendingReports - pendingCount);
+    if (availableSlots <= 0) {
+      window.alert(`Limite de ${maxPendingReports} relatorios aguardando/processando atingido.`);
+      return;
+    }
+
+    const batch = buildMarketAutonomousReportVariants(marketValue, backtestJobs, Math.min(quantity, availableSlots));
+    if (batch.variants.length === 0) {
+      window.alert('Nao foi encontrada uma variacao inedita para este mercado.');
+      return;
+    }
+
+    await createJobsFromVariants(batch.variants);
   };
 
   useEffect(() => {
@@ -285,6 +325,14 @@ export default function App() {
         );
       case 'liveGames':
         return <LiveGames bots={bots} />;
+      case 'reportGenerator':
+        return (
+          <ReportGenerator
+            activeReports={backtestJobs.filter((job) => job.status === 'pending' || job.status === 'processing').length}
+            maxReports={maxPendingReports}
+            onGenerate={generateMarketReports}
+          />
+        );
       case 'backtest':
         return (
           <BacktestPage
