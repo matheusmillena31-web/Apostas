@@ -738,6 +738,33 @@ const server = createServer(async (request, response) => {
     }
   }
 
+  if (incomingUrl.pathname === '/api/football/backtest/jobs/batch') {
+    try {
+      if (request.method === 'POST') {
+        const body = await readJsonBody(request);
+        const jobs = Array.isArray(body?.jobs) ? body.jobs : [];
+        if (jobs.some((job) => !job?.id)) {
+          sendJson(response, 400, { ok: false, message: 'Lote de chamados de backtest invalido.' });
+          return;
+        }
+
+        sendJson(response, 200, {
+          ok: true,
+          storageMode: backtestJobStore.mode,
+          jobs: await backtestJobStore.upsertJobs(jobs),
+        });
+        return;
+      }
+    } catch (error) {
+      sendJson(response, 500, {
+        ok: false,
+        message: 'Nao foi possivel criar o lote de chamados de backtest.',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+  }
+
   const backtestJobMatch = incomingUrl.pathname.match(/^\/api\/football\/backtest\/jobs\/([^/]+)$/);
   if (backtestJobMatch) {
     const jobId = decodeURIComponent(backtestJobMatch[1]);

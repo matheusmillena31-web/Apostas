@@ -5,7 +5,7 @@ import { runBacktest } from './services/backtest';
 import { buildAutonomousReportVariants, buildMarketAutonomousReportVariants, createAutonomousReportHash } from './services/autonomousReportGenerator';
 import { backtestJobRepository } from './services/backtestJobRepository';
 import { loadHistoricalBacktestGames } from './services/replayToBacktest';
-import { storage } from './services/storage';
+import { createBacktestJobDraft, storage } from './services/storage';
 import { Bot, BacktestJob, BacktestResult, BotLog, Game } from './types';
 import { Dashboard } from './pages/Dashboard';
 import { BotsPage, duplicateBot } from './pages/BotsPage';
@@ -193,33 +193,17 @@ export default function App() {
       return false;
     }
 
-    let jobsSnapshot = backtestJobs;
-    for (const [index, variant] of batch.variants.entries()) {
-      const { job } = await backtestJobRepository.create(variant);
-      jobsSnapshot = await backtestJobRepository.patch(job.id, {
-        name: `${variant.name} - ${new Date(job.createdAt).toLocaleString('pt-BR')}`,
-        createdBy: 'Automatico',
-        automation: {
-          source: 'autonomous',
-          hash: createAutonomousReportHash(variant),
-          baseBotId: bot.id,
-          variantIndex: index + 1,
-        },
-      });
-    }
-
-    applyBacktestJobs(jobsSnapshot);
+    await createJobsFromVariants(batch.variants, bot.id);
     setEditingBot(undefined);
     setBotEditorOpen(false);
-    setPage('backtest');
     return true;
   };
 
   const createJobsFromVariants = async (variants: Bot[], baseBotId?: string) => {
-    let jobsSnapshot = backtestJobs;
-    for (const [index, variant] of variants.entries()) {
-      const { job } = await backtestJobRepository.create(variant);
-      jobsSnapshot = await backtestJobRepository.patch(job.id, {
+    const jobsToCreate = variants.map((variant, index) => {
+      const job = createBacktestJobDraft(variant);
+      return {
+        ...job,
         name: `${variant.name} - ${new Date(job.createdAt).toLocaleString('pt-BR')}`,
         createdBy: 'Automatico',
         automation: {
@@ -228,8 +212,9 @@ export default function App() {
           baseBotId,
           variantIndex: index + 1,
         },
-      });
-    }
+      } satisfies BacktestJob;
+    });
+    const jobsSnapshot = await backtestJobRepository.upsertMany(jobsToCreate);
     applyBacktestJobs(jobsSnapshot);
     setPage('backtest');
   };
@@ -267,8 +252,6 @@ export default function App() {
       try {
         await updateBacktestJob(nextJob.id, { status: 'processing', startedAt, progress: 10 });
         const games = await getHistoricalGames();
-        await updateBacktestJob(nextJob.id, { progress: 55 });
-
         const output = runBacktest(nextJob.botSnapshot, games);
 
         saveBacktest(output.result, output.logs);

@@ -109,6 +109,52 @@ export const createBacktestJobStore = ({ filePath, databaseUrl, databaseSsl = tr
     return sortJobs(next);
   };
 
+  const upsertJobs = async (jobsToUpsert = []) => {
+    const normalizedJobs = jobsToUpsert
+      .filter((job) => job?.id)
+      .map((job) => ({
+        ...job,
+        status: job.status ?? 'pending',
+        createdAt: job.createdAt ?? new Date().toISOString(),
+      }));
+
+    if (normalizedJobs.length === 0) return listJobs();
+
+    if (pool) {
+      await ensureDatabase();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const normalized of normalizedJobs) {
+          await client.query(
+            `
+              INSERT INTO backtest_jobs (id, status, payload, created_at, updated_at)
+              VALUES ($1, $2, $3::jsonb, $4, now())
+              ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                payload = EXCLUDED.payload,
+                updated_at = now()
+            `,
+            [normalized.id, normalized.status, JSON.stringify(normalized), normalized.createdAt],
+          );
+        }
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+      return sortJobs(await listJobs());
+    }
+
+    const existing = await readFileJobs();
+    const ids = new Set(normalizedJobs.map((job) => job.id));
+    const next = [...normalizedJobs, ...existing.filter((job) => !ids.has(job.id))];
+    await writeFileJobs(next);
+    return sortJobs(next);
+  };
+
   const patchJob = async (jobId, patch) => {
     const jobs = await listJobs();
     const current = jobs.find((job) => job.id === jobId);
@@ -145,6 +191,7 @@ export const createBacktestJobStore = ({ filePath, databaseUrl, databaseSsl = tr
     ensureDatabase,
     listJobs,
     upsertJob,
+    upsertJobs,
     patchJob,
     deleteJob,
     deleteAllJobs,

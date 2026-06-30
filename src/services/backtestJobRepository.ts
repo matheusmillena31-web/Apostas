@@ -17,6 +17,12 @@ const fallback = {
     storage.saveBacktestJobs(jobs);
     return jobs;
   },
+  upsertMany: (nextJobs: BacktestJob[]) => {
+    const ids = new Set(nextJobs.map((job) => job.id));
+    const jobs = [...nextJobs, ...storage.getBacktestJobs().filter((item) => !ids.has(item.id))];
+    storage.saveBacktestJobs(jobs);
+    return jobs;
+  },
   patch: (jobId: string, patch: Partial<BacktestJob>) => storage.updateBacktestJob(jobId, patch),
   delete: (jobId: string) => storage.deleteBacktestJob(jobId),
   deleteAll: () => storage.deleteAllBacktestJobs(),
@@ -54,6 +60,27 @@ export const backtestJobRepository = {
       return { job, jobs };
     } catch {
       return { job, jobs: fallback.upsert(job) };
+    }
+  },
+
+  upsert: async (job: BacktestJob) => {
+    try {
+      const jobs = await requestJobs('/backtest/jobs', 'POST', { job });
+      return jobs;
+    } catch {
+      return fallback.upsert(job);
+    }
+  },
+
+  upsertMany: async (jobsToUpsert: BacktestJob[]) => {
+    try {
+      const response = await apiClient<BacktestJobsResponse>('/backtest/jobs/batch', {
+        method: 'POST',
+        body: { jobs: jobsToUpsert },
+      });
+      return normalizeJobs(response.jobs ?? []);
+    } catch {
+      return fallback.upsertMany(jobsToUpsert);
     }
   },
 
