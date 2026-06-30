@@ -10,6 +10,11 @@ type BacktestJobsResponse = {
 
 const normalizeJobs = (jobs: unknown[]) => jobs.map(normalizeBacktestJob);
 
+const mirrorLocalJobs = (jobs: BacktestJob[]) => {
+  storage.saveBacktestJobs(jobs);
+  return jobs;
+};
+
 const fallback = {
   list: () => storage.getBacktestJobs(),
   upsert: (job: BacktestJob) => {
@@ -37,7 +42,7 @@ export const backtestJobRepository = {
   list: async () => {
     try {
       const remoteJobs = await requestJobs('/backtest/jobs', 'GET');
-      if (remoteJobs.length > 0) return remoteJobs;
+      if (remoteJobs.length > 0) return mirrorLocalJobs(remoteJobs);
 
       const localJobs = fallback.list();
       if (localJobs.length === 0) return remoteJobs;
@@ -46,7 +51,7 @@ export const backtestJobRepository = {
       for (const job of localJobs) {
         jobs = await requestJobs('/backtest/jobs', 'POST', { job });
       }
-      return jobs;
+      return mirrorLocalJobs(jobs);
     } catch {
       return fallback.list();
     }
@@ -57,7 +62,7 @@ export const backtestJobRepository = {
 
     try {
       const jobs = await requestJobs('/backtest/jobs', 'POST', { job });
-      return { job, jobs };
+      return { job, jobs: mirrorLocalJobs(jobs) };
     } catch {
       return { job, jobs: fallback.upsert(job) };
     }
@@ -66,7 +71,7 @@ export const backtestJobRepository = {
   upsert: async (job: BacktestJob) => {
     try {
       const jobs = await requestJobs('/backtest/jobs', 'POST', { job });
-      return jobs;
+      return mirrorLocalJobs(jobs);
     } catch {
       return fallback.upsert(job);
     }
@@ -78,7 +83,7 @@ export const backtestJobRepository = {
         method: 'POST',
         body: { jobs: jobsToUpsert },
       });
-      return normalizeJobs(response.jobs ?? []);
+      return mirrorLocalJobs(normalizeJobs(response.jobs ?? []));
     } catch {
       return fallback.upsertMany(jobsToUpsert);
     }
@@ -86,7 +91,7 @@ export const backtestJobRepository = {
 
   patch: async (jobId: string, patch: Partial<BacktestJob>) => {
     try {
-      return await requestJobs(`/backtest/jobs/${encodeURIComponent(jobId)}`, 'PATCH', { patch });
+      return mirrorLocalJobs(await requestJobs(`/backtest/jobs/${encodeURIComponent(jobId)}`, 'PATCH', { patch }));
     } catch {
       return fallback.patch(jobId, patch);
     }
@@ -94,7 +99,8 @@ export const backtestJobRepository = {
 
   delete: async (jobId: string) => {
     try {
-      return await requestJobs(`/backtest/jobs/${encodeURIComponent(jobId)}`, 'DELETE');
+      fallback.delete(jobId);
+      return mirrorLocalJobs(await requestJobs(`/backtest/jobs/${encodeURIComponent(jobId)}`, 'DELETE'));
     } catch {
       return fallback.delete(jobId);
     }
@@ -102,7 +108,8 @@ export const backtestJobRepository = {
 
   deleteAll: async () => {
     try {
-      return await requestJobs('/backtest/jobs', 'DELETE');
+      fallback.deleteAll();
+      return mirrorLocalJobs(await requestJobs('/backtest/jobs', 'DELETE'));
     } catch {
       return fallback.deleteAll();
     }
