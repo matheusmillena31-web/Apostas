@@ -47,11 +47,11 @@ const snapshotStore = createSnapshotStore({
 });
 const backtestJobStore = createBacktestJobStore({ filePath: backtestJobsPath, databaseUrl, databaseSsl });
 const collectorEnabled = process.env.API_FOOTBALL_COLLECTOR_ENABLED !== 'false';
-const collectorIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_INTERVAL_MS ?? 90000);
+const collectorIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_INTERVAL_MS ?? 60000);
 const collectorMaxFixtures = Number(process.env.API_FOOTBALL_COLLECTOR_MAX_FIXTURES ?? 2);
 const collectorRequestDelayMs = Number(process.env.API_FOOTBALL_COLLECTOR_REQUEST_DELAY_MS ?? 1200);
 const collectorDailyRequestLimit = Number(process.env.API_FOOTBALL_COLLECTOR_DAILY_REQUEST_LIMIT ?? 7200);
-const collectorHalftimeIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_HALFTIME_INTERVAL_MS ?? 240000);
+const collectorHalftimeIntervalMs = Number(process.env.API_FOOTBALL_COLLECTOR_HALFTIME_INTERVAL_MS ?? 180000);
 const collectorStatsEnabled = process.env.API_FOOTBALL_COLLECTOR_STATS_ENABLED !== 'false';
 const collectorEventsEnabled = process.env.API_FOOTBALL_COLLECTOR_EVENTS_ENABLED !== 'false';
 const collectorOddsEnabled = process.env.API_FOOTBALL_COLLECTOR_ODDS_ENABLED !== 'false';
