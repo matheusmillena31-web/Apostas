@@ -306,6 +306,10 @@ const mergeStatistics = (apiStatistics, derivedStatistics) => {
 
 const buildReplayGroups = async () => {
   const snapshots = await readRawSnapshots();
+  return buildReplayGroupsFromSnapshots(snapshots);
+};
+
+const buildReplayGroupsFromSnapshots = (snapshots) => {
   const groups = new Map();
 
   const ensureGroup = (fixtureId) => {
@@ -404,6 +408,13 @@ const getReplayGames = async ({ includeScoreOnly = false } = {}) => {
     .map(buildReplayGame)
     .filter((game) => includeScoreOnly || game.summary.quality !== 'score_only')
     .sort((a, b) => new Date(b.summary.lastCapturedAt).getTime() - new Date(a.summary.lastCapturedAt).getTime());
+};
+
+const getReplayGameByFixture = async (fixtureId) => {
+  const snapshots = await snapshotStore.readReplaySnapshotsByFixture(fixtureId);
+  const groups = buildReplayGroupsFromSnapshots(snapshots);
+  const group = groups.find((item) => item.fixtureId === fixtureId);
+  return group ? buildReplayGame(group) : undefined;
 };
 
 const buildTargetUrl = (requestUrl) => {
@@ -811,8 +822,7 @@ const server = createServer(async (request, response) => {
   const replayGameMatch = incomingUrl.pathname.match(/^\/api\/football\/replay\/games\/(\d+)$/);
   if (replayGameMatch) {
     const fixtureId = Number(replayGameMatch[1]);
-    const games = await getReplayGames({ includeScoreOnly: true });
-    const game = games.find((item) => item.summary.fixtureId === fixtureId);
+    const game = await getReplayGameByFixture(fixtureId);
 
     if (!game) {
       sendJson(response, 404, {

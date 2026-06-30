@@ -251,6 +251,7 @@ export default function App() {
     const processJob = async () => {
       try {
         await updateBacktestJob(nextJob.id, { status: 'processing', startedAt, progress: 10 });
+        await new Promise((resolve) => setTimeout(resolve, 25));
         const games = await getHistoricalGames();
         const output = runBacktest(nextJob.botSnapshot, games);
 

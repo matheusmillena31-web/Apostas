@@ -3,7 +3,7 @@ import { enrichGamesWithHistoricalPreLiveStats } from './historicalStatsService'
 import { Game, GameSnapshot, LiveStats, TeamLiveStats } from '../types';
 import { ApiFootballOddsBet, ApiFootballReplayGame, ApiFootballReplaySnapshot } from '../types/api';
 
-const MAX_REPLAY_GAMES = 200;
+const MAX_REPLAY_GAMES = 80;
 const REPLAY_GAME_CONCURRENCY = 8;
 
 const normalizeText = (value: unknown) =>
